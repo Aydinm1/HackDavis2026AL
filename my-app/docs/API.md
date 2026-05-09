@@ -417,3 +417,124 @@ npm run seed
 - Task breakdown generation is deterministic, not AI-generated.
 - Reschedule suggestions are simple same-day suggestions, not full optimization.
 - API writes directly to core tables; future AI actions should use confirmation flows for risky changes.
+
+## Daily Check-Ins
+
+Daily check-ins capture student capacity for a single date. They intentionally do not include mood or sleep fields.
+
+### POST `/api/checkins/daily`
+
+Creates or updates one check-in per user per date.
+
+Accepted body:
+
+```json
+{
+  "planningCycleId": "demo_cycle_2026_05_11",
+  "checkinDate": "2026-05-11",
+  "energyScore": 2,
+  "stressScore": 6,
+  "availableCapacityMinutes": 120,
+  "userNote": "Feeling overloaded.",
+  "adjustToday": true
+}
+```
+
+Validation:
+
+- `checkinDate` is required and must start with `YYYY-MM-DD`.
+- `energyScore` is required and must be an integer from `1` to `7`.
+- `stressScore` is required and must be an integer from `1` to `7`.
+- `availableCapacityMinutes` is optional and must be `0` or greater.
+- `userNote` is optional.
+- `adjustToday` is optional.
+- Unknown fields are rejected, including `mood` and `sleep` fields.
+- If `planningCycleId` is provided, it must belong to the current user.
+
+Behavior:
+
+- Saves one check-in per user per date.
+- If a check-in already exists for that date, updates it.
+- If `adjustToday` is `true`, creates or updates a daily `AiInsight`.
+- If `energyScore <= 2` or `stressScore >= 6`, the insight recommends a lighter plan.
+
+Response:
+
+```json
+{
+  "data": {
+    "checkin": {
+      "id": "checkin-id",
+      "checkinDate": "2026-05-11T00:00:00.000Z",
+      "energyScore": 2,
+      "stressScore": 6,
+      "availableCapacityMinutes": 120,
+      "userNote": "Feeling overloaded."
+    },
+    "insight": {
+      "id": "demo_daily_adjustment_2026_05_11",
+      "insightType": "low_energy_plan",
+      "title": "Use a lighter plan today",
+      "severity": "caution"
+    }
+  }
+}
+```
+
+### GET `/api/checkins?start=&end=`
+
+Returns user-scoped check-ins between `start` and `end`.
+
+Example:
+
+```text
+/api/checkins?start=2026-05-11T00:00:00Z&end=2026-05-18T00:00:00Z
+```
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "id": "checkin-id",
+      "checkinDate": "2026-05-11T00:00:00.000Z",
+      "energyScore": 2,
+      "stressScore": 6,
+      "aiInsights": []
+    }
+  ]
+}
+```
+
+### POST `/api/schedule/adjust-today`
+
+Returns simple MVP adjustment suggestions for today.
+
+Behavior:
+
+- Looks at today's user-scoped scheduled blocks.
+- Finds blocks tied to tasks with `cognitiveLoad >= 6`.
+- Returns simple suggestions to shorten, move, or swap demanding work.
+- Does not rewrite the schedule automatically.
+
+Response:
+
+```json
+{
+  "data": {
+    "date": "2026-05-09",
+    "summary": "High cognitive-load blocks found for today.",
+    "suggestedAdjustments": [
+      {
+        "scheduledBlockId": "block-id",
+        "taskId": "task-id",
+        "title": "Chem midterm practice set",
+        "currentStartTime": "2026-05-09T20:00:00.000Z",
+        "currentEndTime": "2026-05-09T21:30:00.000Z",
+        "cognitiveLoad": 7,
+        "suggestion": "Consider shortening this block, moving it later, or replacing it with a lower-load task if today's check-in is low energy or high stress."
+      }
+    ]
+  }
+}

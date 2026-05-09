@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import type * as CalendarEventsService from "@/lib/services/calendarEvents";
+import type * as CheckinsService from "@/lib/services/checkins";
 import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
 import type * as TasksService from "@/lib/services/tasks";
 
@@ -12,11 +13,13 @@ let validatePatchTaskBody: typeof TasksService.validatePatchTaskBody;
 let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
+let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
 
 before(async () => {
   const tasksService = await import("@/lib/services/tasks");
   const calendarEventsService = await import("@/lib/services/calendarEvents");
+  const checkinsService = await import("@/lib/services/checkins");
   const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
 
   validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
@@ -25,6 +28,7 @@ before(async () => {
   validateCalendarRange = calendarEventsService.validateCalendarRange;
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
+  validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
 });
 
@@ -143,4 +147,36 @@ test("scheduled block patch validation accepts mutable fields only", () => {
   assert.equal(goodPatch.ok, true);
   assert.equal(badPatch.ok, false);
   assert.match(badPatch.ok ? "" : badPatch.error, /Unsupported field/);
+});
+
+test("daily check-in validation accepts required fields and adjustToday", () => {
+  const result = validateDailyCheckinBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    checkinDate: "2026-05-11",
+    energyScore: 2,
+    stressScore: 6,
+    availableCapacityMinutes: 120,
+    userNote: "Feeling overloaded.",
+    adjustToday: true,
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.energyScore, 2);
+    assert.equal(result.value.stressScore, 6);
+    assert.ok(result.value.checkinDate instanceof Date);
+  }
+});
+
+test("daily check-in validation rejects mood and sleep fields", () => {
+  const result = validateDailyCheckinBody({
+    checkinDate: "2026-05-11",
+    energyScore: 4,
+    stressScore: 3,
+    mood: "fine",
+    sleepHours: 7,
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /Unsupported field/);
 });
