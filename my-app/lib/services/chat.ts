@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
-import { parseMockChatMessage, type MockParsedAction } from "@/lib/ai/mockParser";
+import { parseGeminiChatMessage } from "@/lib/ai/geminiParser";
+import type { MockParsedAction } from "@/lib/ai/mockParser";
 import { prisma } from "@/lib/db";
 
 type ValidationResult<T> =
@@ -270,7 +271,7 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
     },
   });
 
-  const parsedActions = parseMockChatMessage(input.content);
+  const parsedActions = await parseGeminiChatMessage(input.content);
   const actions = await Promise.all(
     parsedActions.map((action) =>
       recordAndMaybeExecuteAction({
