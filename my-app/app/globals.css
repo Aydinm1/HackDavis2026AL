@@ -14,7 +14,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #101010;
     --foreground: #ededed;
   }
 }
@@ -23,4 +23,50 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+h1 {
+  font-family: "Cormorant Garamond";
+  font-size: 32px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: normal;
+}
+
+h2{
+  /* Header 2 */
+  font-family: "Cormorant Garamond";
+  font-size: 28px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: normal;
+}
+
+h3 {
+  /* Sub header */
+  font-family: "Cormorant Garamond";
+  font-size: 24px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: normal;
+}
+
+p {
+  /* Body */
+  font-family: "Plus Jakarta Sans";
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+  letter-spacing: -0.96px;
+}
+
+.caption {
+  /* Captions */
+  font-family: "Plus Jakarta Sans";
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 300;
+  line-height: normal;
+  letter-spacing: -0.72px;
 }
