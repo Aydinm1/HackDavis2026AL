@@ -1,14 +1,14 @@
 import { getCurrentUserId } from "@/lib/auth";
-import { createImageUpload, validateUploadBody } from "@/lib/services/uploads";
+import { createImageUpload, validateImageUploadBody } from "@/lib/services/uploads";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const validation = validateUploadBody(await request.json());
+    const validation = validateImageUploadBody(await request.json());
 
     if (!validation.ok) {
-      return Response.json({ error: validation.error }, { status: validation.status ?? 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const result = await createImageUpload(getCurrentUserId(), validation.value);

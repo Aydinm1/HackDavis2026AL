@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 type ActionStatus = "proposed" | "executed" | "failed" | "cancelled";
 
@@ -18,6 +18,7 @@ type ChatEntry = {
   role: "user" | "assistant";
   content: string;
   actions?: AiAction[];
+  imageDataUrl?: string;
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -92,15 +93,25 @@ function Message({ entry }: { entry: ChatEntry }) {
   const isUser = entry.role === "user";
   return (
     <div className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-          isUser
-            ? "bg-violet-600 text-white rounded-br-sm"
-            : "bg-zinc-100 text-zinc-800 rounded-bl-sm"
-        }`}
-      >
-        {entry.content}
-      </div>
+      {entry.imageDataUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={entry.imageDataUrl}
+          alt="Uploaded"
+          className="max-w-[60%] rounded-2xl rounded-br-sm border border-zinc-200 object-contain"
+        />
+      )}
+      {entry.content && (
+        <div
+          className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+            isUser
+              ? "bg-violet-600 text-white rounded-br-sm"
+              : "bg-zinc-100 text-zinc-800 rounded-bl-sm"
+          }`}
+        >
+          {entry.content}
+        </div>
+      )}
 
       {entry.actions && entry.actions.length > 0 && (
         <div className="w-full max-w-sm space-y-2">
@@ -126,12 +137,139 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
+  const [isRecording, setIsRecording] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  type UploadResponseData = {
+    transcript?: string;
+    uploadedInput: { id: string };
+    parsedItems: { assistantSummary?: string }[];
+    proposedActions: AiAction[];
+  };
+
+  const handleUploadResult = useCallback((data: UploadResponseData) => {
+    const summary =
+      data.parsedItems.length > 0
+        ? data.parsedItems.map((p) => p.assistantSummary).filter(Boolean).join(" ") ||
+          `Found ${data.parsedItems.length} action(s).`
+        : "No actions detected.";
+
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: summary, actions: data.proposedActions },
+    ]);
+  }, []);
+
+  async function startRecording() {
+    if (loading || isRecording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.split(",")[1];
+          void sendVoice(base64, "audio/webm");
+        };
+        reader.readAsDataURL(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Microphone access denied or unavailable." },
+      ]);
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  }
+
+  async function sendVoice(audioData: string, mimeType: string) {
+    setLoading(true);
+    setMessages((prev) => [...prev, { role: "user", content: "🎤 Transcribing…" }]);
+    try {
+      const res = await fetch("/api/uploads/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioData, mimeType }),
+      });
+      const json = await res.json() as { data?: UploadResponseData; error?: string };
+      if (!res.ok || !json.data) {
+        setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Voice upload failed." }]);
+        return;
+      }
+      const { transcript, ...rest } = json.data;
+      // Replace the placeholder with the real transcript
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last?.role === "user") {
+          updated[updated.length - 1] = {
+            ...last,
+            content: transcript ?? "🎤 Voice message",
+          };
+        }
+        return updated;
+      });
+      handleUploadResult(rest);
+    } catch {
+      setMessages((prev) => [...prev, { role: "assistant", content: "Network error during voice upload." }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function sendImage(imageData: string, mimeType: string, dataUrl: string) {
+    setLoading(true);
+    setMessages((prev) => [...prev, { role: "user", content: "", imageDataUrl: dataUrl }]);
+    try {
+      const res = await fetch("/api/uploads/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData, mimeType }),
+      });
+      const json = await res.json() as { data?: UploadResponseData; error?: string };
+      if (!res.ok || !json.data) {
+        setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Image upload failed." }]);
+        return;
+      }
+      handleUploadResult(json.data);
+    } catch {
+      setMessages((prev) => [...prev, { role: "assistant", content: "Network error during image upload." }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleImageFile(file: File) {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1];
+      void sendImage(base64, file.type, dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function send(text: string) {
     const trimmed = text.trim();
@@ -246,9 +384,60 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {/* Hidden file input for image uploads */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleImageFile(file);
+          e.target.value = "";
+        }}
+      />
+
       {/* Input */}
       <div className="border-t border-zinc-200 bg-white px-4 py-3">
         <div className="flex items-end gap-2 max-w-3xl mx-auto">
+          {/* Image button */}
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={loading || isRecording}
+            title="Upload image"
+            className="shrink-0 h-[42px] w-[42px] rounded-xl border border-zinc-200 hover:border-violet-300 disabled:opacity-40 text-zinc-500 hover:text-violet-600 flex items-center justify-center transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="1" y="3" width="14" height="10" rx="1.5" />
+              <circle cx="5.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+              <path d="M1 11l3.5-3.5 2.5 2.5 2-2 4 4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+
+          {/* Mic button */}
+          <button
+            onClick={isRecording ? stopRecording : () => void startRecording()}
+            disabled={loading && !isRecording}
+            title={isRecording ? "Stop recording" : "Record voice"}
+            className={`shrink-0 h-[42px] w-[42px] rounded-xl border flex items-center justify-center transition-colors ${
+              isRecording
+                ? "bg-red-500 border-red-500 text-white hover:bg-red-600"
+                : "border-zinc-200 hover:border-violet-300 text-zinc-500 hover:text-violet-600 disabled:opacity-40"
+            }`}
+          >
+            {isRecording ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="3" y="3" width="10" height="10" rx="1.5" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="5.5" y="1" width="5" height="8" rx="2.5" />
+                <path d="M2 8a6 6 0 0012 0" strokeLinecap="round" />
+                <line x1="8" y1="14" x2="8" y2="11" strokeLinecap="round" />
+              </svg>
+            )}
+          </button>
+
           <textarea
             ref={textareaRef}
             value={input}
@@ -256,13 +445,13 @@ export default function ChatPage() {
             onKeyDown={handleKey}
             placeholder="Describe a task, event, or say 'plan my day'…"
             rows={1}
-            disabled={loading}
+            disabled={loading || isRecording}
             className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-800 placeholder-zinc-400 outline-none focus:border-violet-400 focus:bg-white transition-colors disabled:opacity-50 min-h-[42px] max-h-32"
             style={{ lineHeight: "1.5" }}
           />
           <button
             onClick={() => void send(input)}
-            disabled={loading || !input.trim()}
+            disabled={loading || isRecording || !input.trim()}
             className="shrink-0 h-[42px] w-[42px] rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-zinc-200 text-white disabled:text-zinc-400 flex items-center justify-center transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -270,7 +459,9 @@ export default function ChatPage() {
             </svg>
           </button>
         </div>
-        <p className="text-center text-xs text-zinc-300 mt-2">Enter to send · Shift+Enter for newline</p>
+        <p className="text-center text-xs text-zinc-300 mt-2">
+          {isRecording ? "Recording… click stop when done" : "Enter to send · Shift+Enter for newline"}
+        </p>
       </div>
     </div>
   );

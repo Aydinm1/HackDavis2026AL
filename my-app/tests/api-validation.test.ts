@@ -24,7 +24,8 @@ let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
-let validateUploadBody: typeof UploadsService.validateUploadBody;
+let validateVoiceUploadBody: typeof UploadsService.validateVoiceUploadBody;
+let validateImageUploadBody: typeof UploadsService.validateImageUploadBody;
 
 before(async () => {
   const tasksService = await import("@/lib/services/tasks");
@@ -49,7 +50,8 @@ before(async () => {
   parseMockChatMessage = mockParser.parseMockChatMessage;
   validateGeminiResponse = geminiParser.validateGeminiResponse;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
-  validateUploadBody = uploadsService.validateUploadBody;
+  validateVoiceUploadBody = uploadsService.validateVoiceUploadBody;
+  validateImageUploadBody = uploadsService.validateImageUploadBody;
 });
 
 test("task create validation accepts the frontend task payload", () => {
@@ -258,16 +260,28 @@ test("mock parser requires confirmation or clarification for updates", () => {
   assert.equal(moveActions[0]?.ambiguous, true);
 });
 
-test("upload validation accepts mock JSON and rejects empty upload bodies", () => {
-  const valid = validateUploadBody({
-    fileUrl: "https://example.com/mock.png",
-    rawTextExtracted: "add chemistry review task",
-  });
-  const invalid = validateUploadBody({});
+test("voice upload validation requires audioData and mimeType", () => {
+  const valid = validateVoiceUploadBody({ audioData: "base64string==", mimeType: "audio/webm" });
+  const missingAudio = validateVoiceUploadBody({ mimeType: "audio/webm" });
+  const missingMime = validateVoiceUploadBody({ audioData: "base64string==" });
+  const empty = validateVoiceUploadBody({});
 
   assert.equal(valid.ok, true);
-  assert.equal(invalid.ok, false);
-  assert.match(invalid.ok ? "" : invalid.error, /fileUrl or rawTextExtracted/);
+  assert.equal(missingAudio.ok, false);
+  assert.equal(missingMime.ok, false);
+  assert.equal(empty.ok, false);
+});
+
+test("image upload validation requires imageData and mimeType", () => {
+  const valid = validateImageUploadBody({ imageData: "base64string==", mimeType: "image/jpeg" });
+  const missingImage = validateImageUploadBody({ mimeType: "image/jpeg" });
+  const missingMime = validateImageUploadBody({ imageData: "base64string==" });
+  const empty = validateImageUploadBody({});
+
+  assert.equal(valid.ok, true);
+  assert.equal(missingImage.ok, false);
+  assert.equal(missingMime.ok, false);
+  assert.equal(empty.ok, false);
 });
 
 test("validateGeminiResponse passes through valid CREATE_TASK entry", () => {
