@@ -1,0 +1,419 @@
+# API Reference
+
+This app uses Next.js Route Handlers under `app/api`. All endpoints currently use MVP/demo auth from `lib/auth.ts`, so every request is treated as the stable demo user:
+
+```ts
+demo_user_hackdavis_2026
+```
+
+There is no real auth or Google OAuth yet. Every database query is scoped by `userId`.
+
+Responses use:
+
+```json
+{ "data": {} }
+```
+
+or:
+
+```json
+{ "error": "Message here." }
+```
+
+Dates are ISO strings. PostgreSQL stores them as timestamps, so responses are usually UTC ISO strings.
+
+## Tasks
+
+### GET `/api/tasks`
+
+Returns all tasks for the current demo user, including task breakdowns and scheduled blocks.
+
+Example response:
+
+```json
+{
+  "data": [
+    {
+      "id": "demo_task_chem_midterm",
+      "userId": "demo_user_hackdavis_2026",
+      "planningCycleId": "demo_cycle_2026_05_11",
+      "title": "Study for chemistry midterm",
+      "description": "Review equilibrium, thermodynamics, and practice problems from the last three lectures.",
+      "type": "school",
+      "workType": "study",
+      "timeframe": "weekly",
+      "status": "todo",
+      "dueAt": "2026-05-14T22:30:00.000Z",
+      "priority": 1,
+      "cognitiveLoad": 7,
+      "estimatedMinutes": 240,
+      "actualMinutes": null,
+      "canSplit": true,
+      "createdBy": "user",
+      "taskBreakdowns": [],
+      "scheduledBlocks": []
+    }
+  ]
+}
+```
+
+### POST `/api/tasks`
+
+Creates a task for the current demo user.
+
+Accepted body:
+
+```json
+{
+  "planningCycleId": "demo_cycle_2026_05_11",
+  "title": "Study for chemistry midterm",
+  "description": "Review practice problems",
+  "type": "school",
+  "workType": "study",
+  "timeframe": "weekly",
+  "dueAt": "2026-05-14T15:30:00-07:00",
+  "priority": 1,
+  "cognitiveLoad": 7,
+  "estimatedMinutes": 90,
+  "canSplit": true,
+  "createdBy": "user"
+}
+```
+
+Validation:
+
+- `title` is required.
+- `priority` must be an integer from `1` to `5`.
+- `cognitiveLoad` must be an integer from `1` to `7`.
+- `dueAt` must be an ISO date string or `null`.
+- Unknown fields are rejected.
+- If `planningCycleId` is provided, it must belong to the current user.
+
+Response: `201` with the created task in `{ "data": task }`.
+
+### PATCH `/api/tasks/[id]`
+
+Updates a user-owned task.
+
+Accepted body fields:
+
+```json
+{
+  "planningCycleId": "demo_cycle_2026_05_11",
+  "title": "Updated title",
+  "description": "Updated notes",
+  "type": "school",
+  "workType": "writing",
+  "timeframe": "weekly",
+  "dueAt": "2026-05-16T23:59:00-07:00",
+  "priority": 2,
+  "cognitiveLoad": 6,
+  "estimatedMinutes": 120,
+  "canSplit": true,
+  "createdBy": "user",
+  "status": "in_progress",
+  "actualMinutes": 45
+}
+```
+
+Only include fields you want to update. Empty patch bodies are rejected.
+
+Response: `200` with the updated task.
+
+### DELETE `/api/tasks/[id]`
+
+Soft-deletes a user-owned task by setting:
+
+```json
+{ "status": "cancelled" }
+```
+
+Response: `200` with the updated task.
+
+### POST `/api/tasks/[id]/complete`
+
+Marks a user-owned task complete.
+
+Optional body:
+
+```json
+{
+  "actualMinutes": 50
+}
+```
+
+Behavior:
+
+- Sets `status` to `"completed"`.
+- Sets `actualMinutes` if provided.
+
+Response: `200` with the updated task.
+
+### POST `/api/tasks/[id]/breakdown`
+
+Creates deterministic MVP task breakdowns without calling AI.
+
+Behavior:
+
+- Study tasks get steps like reviewing notes and practice problems.
+- Writing tasks get outline, draft, revise steps.
+- Project tasks get requirements, implementation, testing steps.
+- Re-running the endpoint upserts the same deterministic breakdown IDs.
+
+Response: `201` with the task breakdown list.
+
+## Calendar Events
+
+Calendar events are fixed busy blocks. For MVP, only manual/mock events are supported. Google OAuth is intentionally not implemented.
+
+### GET `/api/calendar/events?start=&end=`
+
+Returns calendar events for the current user that overlap the requested range.
+
+Example:
+
+```text
+/api/calendar/events?start=2026-05-11T00:00:00-07:00&end=2026-05-18T00:00:00-07:00
+```
+
+Validation:
+
+- `start` is required.
+- `end` is required.
+- Both must be valid ISO date strings.
+- `end` must be after `start`.
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "id": "demo_event_chem_lecture",
+      "provider": "mock",
+      "title": "CHE 118 lecture",
+      "location": "Sciences Lecture Hall 123",
+      "startTime": "2026-05-11T16:00:00.000Z",
+      "endTime": "2026-05-11T17:20:00.000Z",
+      "isAllDay": false,
+      "source": "manual",
+      "status": "confirmed"
+    }
+  ]
+}
+```
+
+### POST `/api/calendar/events`
+
+Creates a manual calendar busy block.
+
+Accepted body:
+
+```json
+{
+  "title": "History discussion section",
+  "description": "Weekly section",
+  "location": "Voorhies Hall 204",
+  "startTime": "2026-05-12T14:10:00-07:00",
+  "endTime": "2026-05-12T15:00:00-07:00",
+  "isAllDay": false,
+  "source": "manual"
+}
+```
+
+Behavior:
+
+- Sets `provider` to `"manual"`.
+- Sets `calendarId` to `"mvp-demo-calendar"`.
+- Sets `status` to `"confirmed"`.
+
+Response: `201` with the created event.
+
+### PATCH `/api/calendar/events/[id]`
+
+Updates a user-owned manual/mock event.
+
+Accepted fields:
+
+```json
+{
+  "title": "Updated event",
+  "description": "Updated description",
+  "location": "Library",
+  "startTime": "2026-05-12T14:30:00-07:00",
+  "endTime": "2026-05-12T15:30:00-07:00",
+  "isAllDay": false,
+  "source": "manual"
+}
+```
+
+Response: `200` with the updated event.
+
+### DELETE `/api/calendar/events/[id]`
+
+Soft-deletes a user-owned manual/mock event by setting:
+
+```json
+{ "status": "cancelled" }
+```
+
+Response: `200` with the updated event.
+
+## Schedule
+
+### GET `/api/schedule?start=&end=`
+
+Returns both fixed calendar events and scheduled work blocks for a date range.
+
+Example:
+
+```text
+/api/schedule?start=2026-05-11T00:00:00-07:00&end=2026-05-18T00:00:00-07:00
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "calendarEvents": [],
+    "scheduledBlocks": [
+      {
+        "id": "demo_block_chem_review",
+        "taskId": "demo_task_chem_midterm",
+        "title": "Chem midterm practice set",
+        "startTime": "2026-05-11T23:00:00.000Z",
+        "endTime": "2026-05-12T00:30:00.000Z",
+        "status": "accepted",
+        "source": "scheduler",
+        "task": {
+          "id": "demo_task_chem_midterm",
+          "title": "Study for chemistry midterm"
+        }
+      }
+    ]
+  }
+}
+```
+
+## Scheduled Blocks
+
+Scheduled blocks are proposed or accepted work sessions for tasks.
+
+### PATCH `/api/scheduled-blocks/[id]`
+
+Updates a user-owned scheduled block.
+
+Accepted fields:
+
+```json
+{
+  "title": "CS project implementation sprint",
+  "startTime": "2026-05-12T10:00:00-07:00",
+  "endTime": "2026-05-12T11:30:00-07:00",
+  "status": "accepted"
+}
+```
+
+Validation:
+
+- Unknown fields are rejected.
+- Empty patch bodies are rejected.
+- If both `startTime` and `endTime` are provided, `endTime` must be after `startTime`.
+- If only one time is provided, the API validates against the existing other time.
+
+Response: `200` with the updated scheduled block, including related `task` and `taskBreakdown`.
+
+### POST `/api/scheduled-blocks/[id]/complete`
+
+Marks a scheduled block as completed.
+
+Behavior:
+
+- Sets the block `status` to `"completed"`.
+- If the block has a task:
+  - If all active scheduled blocks for that task are now completed/cancelled/skipped, marks the task `"completed"`.
+  - Otherwise marks the task `"in_progress"`.
+
+Response:
+
+```json
+{
+  "data": {
+    "scheduledBlock": {
+      "id": "demo_block_chem_review",
+      "status": "completed"
+    },
+    "task": {
+      "id": "demo_task_chem_midterm",
+      "status": "in_progress"
+    }
+  }
+}
+```
+
+### POST `/api/scheduled-blocks/[id]/skip`
+
+Marks a scheduled block as skipped and returns a simple deterministic reschedule suggestion when possible.
+
+Behavior:
+
+- Sets the block `status` to `"skipped"`.
+- Looks for the next same-day opening after the skipped block.
+- Avoids overlapping non-cancelled calendar events and active scheduled blocks.
+- Returns `suggestion: null` if no same-day slot is found.
+
+Response:
+
+```json
+{
+  "data": {
+    "scheduledBlock": {
+      "id": "demo_block_chem_review",
+      "status": "skipped"
+    },
+    "suggestion": {
+      "startTime": "2026-05-11T18:00:00.000Z",
+      "endTime": "2026-05-11T19:30:00.000Z",
+      "reason": "Next same-day opening with no calendar event or active scheduled block conflict."
+    }
+  }
+}
+```
+
+## Seed Data
+
+Run:
+
+```bash
+npm run seed
+```
+
+Creates one demo user with:
+
+- User preferences
+- One active planning cycle
+- Five student tasks
+- Four lecture/calendar events
+- Two scheduled blocks
+- One daily check-in
+- Two AI insights
+
+The seed is idempotent and can be re-run.
+
+## Useful Commands
+
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run seed
+```
+
+## Current MVP Limitations
+
+- Auth is mocked.
+- Google Calendar OAuth is not implemented.
+- Task breakdown generation is deterministic, not AI-generated.
+- Reschedule suggestions are simple same-day suggestions, not full optimization.
+- API writes directly to core tables; future AI actions should use confirmation flows for risky changes.
