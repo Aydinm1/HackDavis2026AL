@@ -545,6 +545,118 @@ Response:
   }
 }
 ```
+
+## Uploaded Inputs
+
+These endpoints are MVP-only and JSON-based. There is no production file storage and no live voice agent. If multipart upload handling is added later, these routes can be extended without changing the core database model.
+
+### POST `/api/uploads/image`
+
+Creates an `UploadedInput` row for an image-like input and returns mock parsed items plus proposed `AiAction` rows.
+
+Accepted body:
+
+```json
+{
+  "fileUrl": "https://example.com/mock-schedule.png",
+  "rawTextExtracted": "Optional OCR text from the image"
+}
+```
+
+Behavior:
+
+- Creates `UploadedInput` with `sourceType: "image"`.
+- Uses a deterministic mock parser.
+- If no real parser exists, returns one sample `calendar_event`.
+- Creates proposed `AiAction` rows for audit and confirmation.
+- Does not create a real `CalendarEvent` immediately.
+
+Response:
+
+```json
+{
+  "data": {
+    "uploadedInput": {
+      "id": "uploaded-input-id",
+      "sourceType": "image",
+      "fileUrl": "https://example.com/mock-schedule.png",
+      "status": "parsed"
+    },
+    "parsedItems": [
+      {
+        "type": "calendar_event",
+        "title": "Review uploaded schedule item",
+        "startTime": "2026-05-12T14:00:00-07:00",
+        "endTime": "2026-05-12T15:00:00-07:00",
+        "source": "image"
+      }
+    ],
+    "proposedActions": [
+      {
+        "id": "action-id",
+        "actionType": "CREATE_EVENT",
+        "status": "proposed",
+        "requiresConfirmation": true
+      }
+    ]
+  }
+}
+```
+
+### POST `/api/uploads/voice`
+
+Creates an `UploadedInput` row for a voice-like input and parses its transcript through the same chat mock parser.
+
+Accepted body:
+
+```json
+{
+  "fileUrl": "https://example.com/mock-audio.m4a",
+  "rawTextExtracted": "add chemistry review task due 2026-05-14 high priority"
+}
+```
+
+Behavior:
+
+- Creates `UploadedInput` with `sourceType: "voice"`.
+- Treats `rawTextExtracted` as the transcript.
+- Passes the transcript through `lib/ai/mockParser.ts`.
+- Creates proposed `AiAction` rows for audit.
+- Does not implement a live voice agent.
+
+Response:
+
+```json
+{
+  "data": {
+    "uploadedInput": {
+      "id": "uploaded-input-id",
+      "sourceType": "voice",
+      "rawTextExtracted": "add chemistry review task due 2026-05-14 high priority",
+      "status": "parsed"
+    },
+    "parsedItems": [
+      {
+        "type": "create_task",
+        "actionType": "CREATE_TASK",
+        "requiresConfirmation": false,
+        "inputPayload": {
+          "title": "chemistry review",
+          "priority": 1
+        }
+      }
+    ],
+    "proposedActions": [
+      {
+        "id": "action-id",
+        "actionType": "CREATE_TASK",
+        "status": "proposed",
+        "requiresConfirmation": true
+      }
+    ]
+  }
+}
+```
 ```
 
 ## Scheduled Blocks

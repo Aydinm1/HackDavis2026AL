@@ -7,6 +7,7 @@ import type * as DashboardService from "@/lib/services/dashboard";
 import type * as MockParser from "@/lib/ai/mockParser";
 import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
 import type * as TasksService from "@/lib/services/tasks";
+import type * as UploadsService from "@/lib/services/uploads";
 
 process.env.DATABASE_URL ??= "postgresql://user:password@localhost:5432/testdb?schema=public";
 
@@ -21,6 +22,7 @@ let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
+let validateUploadBody: typeof UploadsService.validateUploadBody;
 
 before(async () => {
   const tasksService = await import("@/lib/services/tasks");
@@ -30,6 +32,7 @@ before(async () => {
   const dashboardService = await import("@/lib/services/dashboard");
   const mockParser = await import("@/lib/ai/mockParser");
   const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
+  const uploadsService = await import("@/lib/services/uploads");
 
   validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
   validateCreateTaskBody = tasksService.validateCreateTaskBody;
@@ -42,6 +45,7 @@ before(async () => {
   parseDashboardDate = dashboardService.parseDashboardDate;
   parseMockChatMessage = mockParser.parseMockChatMessage;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
+  validateUploadBody = uploadsService.validateUploadBody;
 });
 
 test("task create validation accepts the frontend task payload", () => {
@@ -248,4 +252,16 @@ test("mock parser requires confirmation or clarification for updates", () => {
   assert.equal(moveActions[0]?.actionType, "UPDATE_TASK");
   assert.equal(moveActions[0]?.requiresConfirmation, true);
   assert.equal(moveActions[0]?.ambiguous, true);
+});
+
+test("upload validation accepts mock JSON and rejects empty upload bodies", () => {
+  const valid = validateUploadBody({
+    fileUrl: "https://example.com/mock.png",
+    rawTextExtracted: "add chemistry review task",
+  });
+  const invalid = validateUploadBody({});
+
+  assert.equal(valid.ok, true);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /fileUrl or rawTextExtracted/);
 });
