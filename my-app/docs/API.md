@@ -296,6 +296,86 @@ Response:
 }
 ```
 
+## Dashboard
+
+### GET `/api/dashboard/today?date=YYYY-MM-DD`
+
+Returns the main payload for a single-day dashboard.
+
+Example:
+
+```text
+/api/dashboard/today?date=2026-05-11
+```
+
+Validation:
+
+- `date` is required.
+- `date` must be in `YYYY-MM-DD` format.
+- Invalid calendar dates, such as `2026-02-30`, are rejected.
+
+Response:
+
+```json
+{
+  "data": {
+    "date": "2026-05-11",
+    "checkin": {
+      "id": "demo_checkin_2026_05_11",
+      "energyScore": 4,
+      "stressScore": 6,
+      "aiInsights": []
+    },
+    "nextCalendarEvent": {
+      "id": "demo_event_chem_lecture",
+      "title": "CHE 118 lecture",
+      "startTime": "2026-05-11T16:00:00.000Z",
+      "endTime": "2026-05-11T17:20:00.000Z",
+      "status": "confirmed"
+    },
+    "todayBlocks": [
+      {
+        "id": "demo_block_chem_review",
+        "title": "Chem midterm practice set",
+        "startTime": "2026-05-11T23:00:00.000Z",
+        "endTime": "2026-05-12T00:30:00.000Z",
+        "status": "accepted",
+        "task": {
+          "id": "demo_task_chem_midterm",
+          "title": "Study for chemistry midterm"
+        }
+      }
+    ],
+    "topTasks": [
+      {
+        "id": "demo_task_chem_midterm",
+        "title": "Study for chemistry midterm",
+        "dueAt": "2026-05-14T22:30:00.000Z",
+        "priority": 1,
+        "status": "todo"
+      }
+    ],
+    "insights": [
+      {
+        "id": "demo_insight_recovery_window",
+        "scope": "daily",
+        "title": "Protect a recovery window tonight",
+        "severity": "caution"
+      }
+    ]
+  }
+}
+```
+
+Rules:
+
+- `checkin` is today's check-in if present.
+- `todayBlocks` are scheduled blocks whose `startTime` is on that date.
+- `nextCalendarEvent` is the next non-cancelled calendar event after now if the requested date is today, otherwise after the start of the requested date.
+- `topTasks` are incomplete tasks sorted by due date urgency, then priority.
+- `insights` are the five most recent daily/weekly insights for the user.
+```
+
 ## Scheduled Blocks
 
 Scheduled blocks are proposed or accepted work sessions for tasks.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import type * as CalendarEventsService from "@/lib/services/calendarEvents";
 import type * as CheckinsService from "@/lib/services/checkins";
+import type * as DashboardService from "@/lib/services/dashboard";
 import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
 import type * as TasksService from "@/lib/services/tasks";
 
@@ -14,12 +15,14 @@ let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
 let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
+let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
 
 before(async () => {
   const tasksService = await import("@/lib/services/tasks");
   const calendarEventsService = await import("@/lib/services/calendarEvents");
   const checkinsService = await import("@/lib/services/checkins");
+  const dashboardService = await import("@/lib/services/dashboard");
   const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
 
   validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
@@ -29,6 +32,7 @@ before(async () => {
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
   validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
+  parseDashboardDate = dashboardService.parseDashboardDate;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
 });
 
@@ -179,4 +183,22 @@ test("daily check-in validation rejects mood and sleep fields", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.ok ? "" : result.error, /Unsupported field/);
+});
+
+test("dashboard date validation accepts only valid YYYY-MM-DD dates", () => {
+  const valid = parseDashboardDate(new URLSearchParams({ date: "2026-05-11" }));
+  const invalidFormat = parseDashboardDate(new URLSearchParams({ date: "05-11-2026" }));
+  const invalidDate = parseDashboardDate(new URLSearchParams({ date: "2026-02-30" }));
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.date, "2026-05-11");
+    assert.equal(valid.value.start.toISOString(), "2026-05-11T00:00:00.000Z");
+  }
+
+  assert.equal(invalidFormat.ok, false);
+  assert.match(invalidFormat.ok ? "" : invalidFormat.error, /YYYY-MM-DD/);
+
+  assert.equal(invalidDate.ok, false);
+  assert.match(invalidDate.ok ? "" : invalidDate.error, /valid calendar date/);
 });
