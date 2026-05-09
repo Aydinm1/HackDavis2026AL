@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import type * as CalendarEventsService from "@/lib/services/calendarEvents";
 import type * as CheckinsService from "@/lib/services/checkins";
+import type * as ChatService from "@/lib/services/chat";
 import type * as DashboardService from "@/lib/services/dashboard";
+import type * as MockParser from "@/lib/ai/mockParser";
 import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
 import type * as TasksService from "@/lib/services/tasks";
 
@@ -15,14 +17,18 @@ let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
 let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
+let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
+let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
 
 before(async () => {
   const tasksService = await import("@/lib/services/tasks");
   const calendarEventsService = await import("@/lib/services/calendarEvents");
   const checkinsService = await import("@/lib/services/checkins");
+  const chatService = await import("@/lib/services/chat");
   const dashboardService = await import("@/lib/services/dashboard");
+  const mockParser = await import("@/lib/ai/mockParser");
   const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
 
   validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
@@ -32,7 +38,9 @@ before(async () => {
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
   validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
+  validateChatMessageBody = chatService.validateChatMessageBody;
   parseDashboardDate = dashboardService.parseDashboardDate;
+  parseMockChatMessage = mockParser.parseMockChatMessage;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
 });
 
@@ -201,4 +209,43 @@ test("dashboard date validation accepts only valid YYYY-MM-DD dates", () => {
 
   assert.equal(invalidDate.ok, false);
   assert.match(invalidDate.ok ? "" : invalidDate.error, /valid calendar date/);
+});
+
+test("chat message validation requires content", () => {
+  const valid = validateChatMessageBody({
+    content: "add chemistry review task due 2026-05-14 high priority",
+  });
+  const invalid = validateChatMessageBody({
+    threadId: "thread-id",
+  });
+
+  assert.equal(valid.ok, true);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /content is required/);
+});
+
+test("mock parser creates task and event actions from simple text", () => {
+  const taskActions = parseMockChatMessage("add chemistry review task due 2026-05-14 high priority");
+  const eventActions = parseMockChatMessage("dentist appointment 2026-05-12 at 2pm");
+
+  assert.equal(taskActions[0]?.actionType, "CREATE_TASK");
+  assert.equal(taskActions[0]?.requiresConfirmation, false);
+  assert.equal(taskActions[0]?.inputPayload.priority, 1);
+
+  assert.equal(eventActions[0]?.actionType, "CREATE_EVENT");
+  assert.equal(eventActions[0]?.requiresConfirmation, false);
+  assert.equal(typeof eventActions[0]?.inputPayload.startTime, "string");
+});
+
+test("mock parser requires confirmation or clarification for updates", () => {
+  const completeActions = parseMockChatMessage("complete chemistry review");
+  const moveActions = parseMockChatMessage("move my study block");
+
+  assert.equal(completeActions[0]?.actionType, "UPDATE_TASK");
+  assert.equal(completeActions[0]?.requiresConfirmation, true);
+  assert.equal(completeActions[0]?.ambiguous, false);
+
+  assert.equal(moveActions[0]?.actionType, "UPDATE_TASK");
+  assert.equal(moveActions[0]?.requiresConfirmation, true);
+  assert.equal(moveActions[0]?.ambiguous, true);
 });
