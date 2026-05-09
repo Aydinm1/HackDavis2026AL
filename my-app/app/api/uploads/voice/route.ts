@@ -1,14 +1,14 @@
 import { getCurrentUserId } from "@/lib/auth";
-import { createVoiceUpload, validateUploadBody } from "@/lib/services/uploads";
+import { createVoiceUpload, validateVoiceUploadBody } from "@/lib/services/uploads";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const validation = validateUploadBody(await request.json());
+    const validation = validateVoiceUploadBody(await request.json());
 
     if (!validation.ok) {
-      return Response.json({ error: validation.error }, { status: validation.status ?? 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const result = await createVoiceUpload(getCurrentUserId(), validation.value);
