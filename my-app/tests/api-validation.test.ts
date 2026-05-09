@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import type * as CalendarEventsService from "@/lib/services/calendarEvents";
 import type * as CheckinsService from "@/lib/services/checkins";
+import type * as ChatService from "@/lib/services/chat";
 import type * as DashboardService from "@/lib/services/dashboard";
+import type * as MockParser from "@/lib/ai/mockParser";
+import type * as GeminiParser from "@/lib/ai/geminiParser";
 import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
 import type * as TasksService from "@/lib/services/tasks";
+import type * as UploadsService from "@/lib/services/uploads";
 
 process.env.DATABASE_URL ??= "postgresql://user:password@localhost:5432/testdb?schema=public";
 
@@ -15,15 +19,23 @@ let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
 let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
+let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
+let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
+let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
+let validateUploadBody: typeof UploadsService.validateUploadBody;
 
 before(async () => {
   const tasksService = await import("@/lib/services/tasks");
   const calendarEventsService = await import("@/lib/services/calendarEvents");
   const checkinsService = await import("@/lib/services/checkins");
+  const chatService = await import("@/lib/services/chat");
   const dashboardService = await import("@/lib/services/dashboard");
+  const mockParser = await import("@/lib/ai/mockParser");
+  const geminiParser = await import("@/lib/ai/geminiParser");
   const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
+  const uploadsService = await import("@/lib/services/uploads");
 
   validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
   validateCreateTaskBody = tasksService.validateCreateTaskBody;
@@ -32,8 +44,12 @@ before(async () => {
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
   validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
+  validateChatMessageBody = chatService.validateChatMessageBody;
   parseDashboardDate = dashboardService.parseDashboardDate;
+  parseMockChatMessage = mockParser.parseMockChatMessage;
+  validateGeminiResponse = geminiParser.validateGeminiResponse;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
+  validateUploadBody = uploadsService.validateUploadBody;
 });
 
 test("task create validation accepts the frontend task payload", () => {
@@ -201,4 +217,167 @@ test("dashboard date validation accepts only valid YYYY-MM-DD dates", () => {
 
   assert.equal(invalidDate.ok, false);
   assert.match(invalidDate.ok ? "" : invalidDate.error, /valid calendar date/);
+});
+
+test("chat message validation requires content", () => {
+  const valid = validateChatMessageBody({
+    content: "add chemistry review task due 2026-05-14 high priority",
+  });
+  const invalid = validateChatMessageBody({
+    threadId: "thread-id",
+  });
+
+  assert.equal(valid.ok, true);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /content is required/);
+});
+
+test("mock parser creates task and event actions from simple text", () => {
+  const taskActions = parseMockChatMessage("add chemistry review task due 2026-05-14 high priority");
+  const eventActions = parseMockChatMessage("dentist appointment 2026-05-12 at 2pm");
+
+  assert.equal(taskActions[0]?.actionType, "CREATE_TASK");
+  assert.equal(taskActions[0]?.requiresConfirmation, false);
+  assert.equal(taskActions[0]?.inputPayload.priority, 1);
+
+  assert.equal(eventActions[0]?.actionType, "CREATE_EVENT");
+  assert.equal(eventActions[0]?.requiresConfirmation, false);
+  assert.equal(typeof eventActions[0]?.inputPayload.startTime, "string");
+});
+
+test("mock parser requires confirmation or clarification for updates", () => {
+  const completeActions = parseMockChatMessage("complete chemistry review");
+  const moveActions = parseMockChatMessage("move my study block");
+
+  assert.equal(completeActions[0]?.actionType, "UPDATE_TASK");
+  assert.equal(completeActions[0]?.requiresConfirmation, true);
+  assert.equal(completeActions[0]?.ambiguous, false);
+
+  assert.equal(moveActions[0]?.actionType, "UPDATE_TASK");
+  assert.equal(moveActions[0]?.requiresConfirmation, true);
+  assert.equal(moveActions[0]?.ambiguous, true);
+});
+
+test("upload validation accepts mock JSON and rejects empty upload bodies", () => {
+  const valid = validateUploadBody({
+    fileUrl: "https://example.com/mock.png",
+    rawTextExtracted: "add chemistry review task",
+  });
+  const invalid = validateUploadBody({});
+
+  assert.equal(valid.ok, true);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /fileUrl or rawTextExtracted/);
+});
+
+test("validateGeminiResponse passes through valid CREATE_TASK entry", () => {
+  const raw = [
+    {
+      actionType: "CREATE_TASK",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "I can add that task.",
+      inputPayload: { title: "Study for bio exam", dueAt: "2026-05-14T23:59:00Z", priority: 2, cognitiveLoad: 5 },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "CREATE_TASK");
+  assert.equal(result[0]?.requiresConfirmation, false);
+  assert.equal(result[0]?.inputPayload.title, "Study for bio exam");
+});
+
+test("validateGeminiResponse passes through valid CREATE_EVENT entry", () => {
+  const raw = [
+    {
+      actionType: "CREATE_EVENT",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "I can add that event.",
+      inputPayload: { title: "Dentist", startTime: "2026-05-12T14:00:00Z", endTime: "2026-05-12T15:00:00Z" },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "CREATE_EVENT");
+  assert.equal(result[0]?.inputPayload.startTime, "2026-05-12T14:00:00Z");
+});
+
+test("validateGeminiResponse passes through GENERATE_SCHEDULE with no required fields", () => {
+  const raw = [
+    {
+      actionType: "GENERATE_SCHEDULE",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Generating your schedule.",
+      inputPayload: { rawText: "plan my day" },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "GENERATE_SCHEDULE");
+});
+
+test("validateGeminiResponse skips entries missing actionType", () => {
+  const raw = [
+    {
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Missing action type.",
+      inputPayload: {},
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 0);
+});
+
+test("validateGeminiResponse skips entries with unknown actionType", () => {
+  const raw = [
+    {
+      actionType: "DO_SOMETHING_WEIRD",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Unknown type.",
+      inputPayload: {},
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 0);
+});
+
+test("validateGeminiResponse uses empty object when inputPayload is not an object", () => {
+  const raw = [
+    {
+      actionType: "CREATE_TASK",
+      requiresConfirmation: false,
+      ambiguous: true,
+      assistantSummary: "Bad payload.",
+      inputPayload: "not-an-object",
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0]?.inputPayload, {});
+});
+
+test("validateGeminiResponse returns empty array for empty input", () => {
+  assert.deepEqual(validateGeminiResponse([]), []);
+});
+
+test("validateGeminiResponse returns empty array for non-array input", () => {
+  assert.deepEqual(validateGeminiResponse(null), []);
+  assert.deepEqual(validateGeminiResponse({ actionType: "CREATE_TASK" }), []);
+  assert.deepEqual(validateGeminiResponse("a string"), []);
 });

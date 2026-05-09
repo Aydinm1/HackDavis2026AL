@@ -374,6 +374,289 @@ Rules:
 - `nextCalendarEvent` is the next non-cancelled calendar event after now if the requested date is today, otherwise after the start of the requested date.
 - `topTasks` are incomplete tasks sorted by due date urgency, then priority.
 - `insights` are the five most recent daily/weekly insights for the user.
+
+## Chat And AI Actions
+
+Chat is an input layer, not the source of truth. When a user creates a task or event through chat, the API writes real `Task` or `CalendarEvent` rows and stores an `AiAction` audit record.
+
+The MVP parser is deterministic and lives in `lib/ai/mockParser.ts`. It detects simple text patterns:
+
+- `add ... task`
+- `due ...`
+- `high priority`
+- `medium priority`
+- `low priority`
+- `event`
+- `appointment`
+- `move`
+- `complete`
+- `schedule`
+
+Supported action types:
+
+- `CREATE_TASK`
+- `CREATE_EVENT`
+- `UPDATE_TASK`
+- `GENERATE_SCHEDULE`
+
+### POST `/api/chat/message`
+
+Creates a user chat message, runs the mock parser, stores `AiAction` rows, optionally executes safe actions, and stores an assistant response.
+
+Accepted body:
+
+```json
+{
+  "threadId": "optional-existing-thread-id",
+  "planningCycleId": "optional-cycle-id",
+  "content": "add chemistry review task due 2026-05-14 high priority"
+}
+```
+
+Behavior:
+
+- If `threadId` is omitted, creates a new chat thread.
+- Saves the user message.
+- Parses actions from `content`.
+- Creates `AiAction` rows for audit.
+- Executes unambiguous `CREATE_TASK`, `CREATE_EVENT`, and `GENERATE_SCHEDULE` actions immediately.
+- `complete` and other destructive/ambiguous updates require confirmation.
+- Ambiguous updates return an assistant clarification message.
+
+Example response:
+
+```json
+{
+  "data": {
+    "thread": {
+      "id": "thread-id",
+      "title": "add chemistry review task due 2026-05-14 high priority"
+    },
+    "userMessage": {
+      "role": "user",
+      "content": "add chemistry review task due 2026-05-14 high priority"
+    },
+    "assistantMessage": {
+      "role": "assistant",
+      "content": "I can add the task \"chemistry review\"."
+    },
+    "actions": [
+      {
+        "id": "action-id",
+        "actionType": "CREATE_TASK",
+        "status": "executed",
+        "requiresConfirmation": false,
+        "resultPayload": {
+          "task": {
+            "id": "task-id",
+            "title": "chemistry review"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+### GET `/api/chat/threads`
+
+Returns current-user chat threads, sorted by latest update.
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "id": "thread-id",
+      "title": "add chemistry review task due...",
+      "messages": [],
+      "aiActions": []
+    }
+  ]
+}
+```
+
+### GET `/api/chat/threads/[id]/messages`
+
+Returns all messages for a user-owned thread, including linked `AiAction` rows.
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "id": "message-id",
+      "role": "user",
+      "content": "complete chemistry review",
+      "aiActions": [
+        {
+          "id": "action-id",
+          "actionType": "UPDATE_TASK",
+          "status": "proposed",
+          "requiresConfirmation": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+### POST `/api/ai-actions/[id]/confirm`
+
+Confirms a proposed AI action.
+
+Behavior:
+
+- Only user-owned actions can be confirmed.
+- Only `proposed` actions can be confirmed.
+- Ambiguous actions cannot be confirmed until clarified.
+- `UPDATE_TASK` with `operation: "complete"` marks the matched task completed.
+
+Response:
+
+```json
+{
+  "data": {
+    "id": "action-id",
+    "status": "executed",
+    "resultPayload": {
+      "task": {
+        "id": "task-id",
+        "status": "completed"
+      }
+    }
+  }
+}
+```
+
+### POST `/api/ai-actions/[id]/cancel`
+
+Cancels a proposed AI action.
+
+Response:
+
+```json
+{
+  "data": {
+    "id": "action-id",
+    "status": "cancelled"
+  }
+}
+```
+
+## Uploaded Inputs
+
+These endpoints are MVP-only and JSON-based. There is no production file storage and no live voice agent. If multipart upload handling is added later, these routes can be extended without changing the core database model.
+
+### POST `/api/uploads/image`
+
+Creates an `UploadedInput` row for an image-like input and returns mock parsed items plus proposed `AiAction` rows.
+
+Accepted body:
+
+```json
+{
+  "fileUrl": "https://example.com/mock-schedule.png",
+  "rawTextExtracted": "Optional OCR text from the image"
+}
+```
+
+Behavior:
+
+- Creates `UploadedInput` with `sourceType: "image"`.
+- Uses a deterministic mock parser.
+- If no real parser exists, returns one sample `calendar_event`.
+- Creates proposed `AiAction` rows for audit and confirmation.
+- Does not create a real `CalendarEvent` immediately.
+
+Response:
+
+```json
+{
+  "data": {
+    "uploadedInput": {
+      "id": "uploaded-input-id",
+      "sourceType": "image",
+      "fileUrl": "https://example.com/mock-schedule.png",
+      "status": "parsed"
+    },
+    "parsedItems": [
+      {
+        "type": "calendar_event",
+        "title": "Review uploaded schedule item",
+        "startTime": "2026-05-12T14:00:00-07:00",
+        "endTime": "2026-05-12T15:00:00-07:00",
+        "source": "image"
+      }
+    ],
+    "proposedActions": [
+      {
+        "id": "action-id",
+        "actionType": "CREATE_EVENT",
+        "status": "proposed",
+        "requiresConfirmation": true
+      }
+    ]
+  }
+}
+```
+
+### POST `/api/uploads/voice`
+
+Creates an `UploadedInput` row for a voice-like input and parses its transcript through the same chat mock parser.
+
+Accepted body:
+
+```json
+{
+  "fileUrl": "https://example.com/mock-audio.m4a",
+  "rawTextExtracted": "add chemistry review task due 2026-05-14 high priority"
+}
+```
+
+Behavior:
+
+- Creates `UploadedInput` with `sourceType: "voice"`.
+- Treats `rawTextExtracted` as the transcript.
+- Passes the transcript through `lib/ai/mockParser.ts`.
+- Creates proposed `AiAction` rows for audit.
+- Does not implement a live voice agent.
+
+Response:
+
+```json
+{
+  "data": {
+    "uploadedInput": {
+      "id": "uploaded-input-id",
+      "sourceType": "voice",
+      "rawTextExtracted": "add chemistry review task due 2026-05-14 high priority",
+      "status": "parsed"
+    },
+    "parsedItems": [
+      {
+        "type": "create_task",
+        "actionType": "CREATE_TASK",
+        "requiresConfirmation": false,
+        "inputPayload": {
+          "title": "chemistry review",
+          "priority": 1
+        }
+      }
+    ],
+    "proposedActions": [
+      {
+        "id": "action-id",
+        "actionType": "CREATE_TASK",
+        "status": "proposed",
+        "requiresConfirmation": true
+      }
+    ]
+  }
+}
+```
 ```
 
 ## Scheduled Blocks
