@@ -1,5 +1,5 @@
 export type MockParsedAction = {
-  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN";
+  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN" | "ADJUST_TODAY";
   requiresConfirmation: boolean;
   ambiguous: boolean;
   inputPayload: Record<string, unknown>;
@@ -325,6 +325,16 @@ export function parseMockChatMessage(content: string): MockParsedAction[] {
         rawText: text,
       },
       assistantSummary: "Which task or block should I move, and what new time should it use?",
+    });
+  }
+
+  if (/\b(adjust my day|lighten|make today easier|i('m| am) (stressed|overwhelmed)|too much today|adjust today|reschedule today)\b/i.test(text)) {
+    actions.push({
+      actionType: "ADJUST_TODAY",
+      requiresConfirmation: false,
+      ambiguous: false,
+      inputPayload: { rawText: text },
+      assistantSummary: "Let me analyze today's schedule and suggest adjustments based on your check-in.",
     });
   }
 

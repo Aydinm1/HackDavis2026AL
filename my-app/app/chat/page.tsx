@@ -6,7 +6,7 @@ type ActionStatus = "proposed" | "executed" | "failed" | "cancelled";
 
 type AiAction = {
   id: string;
-  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN";
+  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN" | "ADJUST_TODAY";
   status: ActionStatus;
   requiresConfirmation: boolean;
   inputPayload: Record<string, unknown>;
@@ -32,6 +32,25 @@ const ACTION_COLORS: Record<string, string> = {
   UPDATE_TASK: "bg-amber-100 text-amber-800 border-amber-200",
   GENERATE_SCHEDULE: "bg-emerald-100 text-emerald-800 border-emerald-200",
   DAILY_CHECKIN: "bg-cyan-100 text-cyan-800 border-cyan-200",
+  ADJUST_TODAY: "bg-teal-100 text-teal-800 border-teal-200",
+};
+
+type AdjustmentAction = "keep" | "shorten" | "move" | "skip" | "replace_with_lower_load_task";
+
+const ADJUSTMENT_BADGE_COLORS: Record<AdjustmentAction, string> = {
+  keep: "bg-green-100 text-green-800 border-green-200",
+  shorten: "bg-amber-100 text-amber-800 border-amber-200",
+  move: "bg-blue-100 text-blue-800 border-blue-200",
+  skip: "bg-red-100 text-red-800 border-red-200",
+  replace_with_lower_load_task: "bg-violet-100 text-violet-800 border-violet-200",
+};
+
+const ADJUSTMENT_BADGE_LABELS: Record<AdjustmentAction, string> = {
+  keep: "Keep",
+  shorten: "Shorten",
+  move: "Move",
+  skip: "Skip",
+  replace_with_lower_load_task: "Replace",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -124,7 +143,44 @@ function ActionCard({
       </div>
 
       <div className="space-y-1 bg-white/60 rounded p-2">
-        {isEditing ? (
+        {action.actionType === "ADJUST_TODAY" && action.status === "executed" && action.resultPayload ? (
+          <div className="space-y-2">
+            {typeof action.resultPayload.summary === "string" && (
+              <p className="text-xs text-zinc-600">{action.resultPayload.summary}</p>
+            )}
+            {Array.isArray(action.resultPayload.suggestedAdjustments) &&
+              (action.resultPayload.suggestedAdjustments as Record<string, unknown>[]).map((adj, i) => {
+                const adjAction = adj.action as AdjustmentAction;
+                const badgeClass = ADJUSTMENT_BADGE_COLORS[adjAction] ?? "bg-zinc-100 text-zinc-700 border-zinc-200";
+                const label = ADJUSTMENT_BADGE_LABELS[adjAction] ?? String(adj.action);
+                return (
+                  <div key={String(adj.scheduledBlockId ?? i)} className="rounded-md border border-zinc-200 bg-white p-2">
+                    <div className="flex items-start justify-between gap-1">
+                      <span className="text-xs font-medium text-zinc-900">{String(adj.title ?? "")}</span>
+                      <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-xs font-semibold ${badgeClass}`}>
+                        {label}
+                      </span>
+                    </div>
+                    {typeof adj.reason === "string" && (
+                      <p className="mt-0.5 text-xs text-zinc-500">{adj.reason}</p>
+                    )}
+                    {adjAction === "shorten" && typeof adj.suggestedDurationMinutes === "number" && (
+                      <p className="mt-0.5 text-xs text-amber-700">
+                        {adj.suggestedDurationMinutes} min suggested (currently {String(adj.currentDurationMinutes)} min)
+                      </p>
+                    )}
+                    {adjAction === "replace_with_lower_load_task" &&
+                      typeof adj.replacementTask === "object" &&
+                      adj.replacementTask !== null && (
+                        <p className="mt-0.5 text-xs text-violet-700">
+                          Replace with: {String((adj.replacementTask as Record<string, unknown>).title ?? "")}
+                        </p>
+                      )}
+                  </div>
+                );
+              })}
+          </div>
+        ) : isEditing ? (
           <div className="space-y-2">
             <textarea
               value={draftPayload}

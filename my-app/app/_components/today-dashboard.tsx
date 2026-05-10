@@ -2,6 +2,7 @@ import { getCurrentUserId } from "@/lib/auth";
 import { getTodayDashboard, parseDashboardDate } from "@/lib/services/dashboard";
 import { DailyCheckinForm, type DailyCheckinFormState } from "@/app/_components/daily-checkin-form";
 import { TodayBlocksClient, type TodayBlockViewModel } from "@/app/_components/today-blocks-client";
+import { AdjustTodayClient } from "@/app/_components/adjust-today-client";
 
 const defaultDemoDate = "2026-05-11";
 
@@ -164,7 +165,10 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
 
         <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
           <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-            <h2 className="text-base font-semibold text-zinc-950">Today&apos;s blocks</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-zinc-950">Today&apos;s blocks</h2>
+            </div>
+            <AdjustTodayClient />
             <TodayBlocksClient initialBlocks={todayBlocks} />
           </article>
 

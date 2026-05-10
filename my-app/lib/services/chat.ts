@@ -7,7 +7,7 @@ import {
   type MockParsedAction,
 } from "@/lib/ai/mockParser";
 import { prisma } from "@/lib/db";
-import { upsertDailyCheckin } from "@/lib/services/checkins";
+import { getTodayScheduleAdjustments, upsertDailyCheckin } from "@/lib/services/checkins";
 import { generateSchedule } from "@/lib/services/scheduledBlocks";
 import { generateTaskBreakdown } from "@/lib/services/tasks";
 
@@ -561,6 +561,19 @@ function normalizeGenerateScheduleAction(action: MockParsedAction, originalText:
   };
 }
 
+function normalizeAdjustTodayAction(action: MockParsedAction): MockParsedAction {
+  if (action.actionType !== "ADJUST_TODAY") {
+    return action;
+  }
+
+  return {
+    ...action,
+    requiresConfirmation: false,
+    ambiguous: false,
+    assistantSummary: "Analyzing today's schedule and suggesting adjustments based on your check-in…",
+  };
+}
+
 function normalizeDailyCheckinAction(action: MockParsedAction, originalText: string): MockParsedAction {
   if (action.actionType !== "DAILY_CHECKIN") {
     return action;
@@ -645,12 +658,14 @@ function addImplicitEventActionIfNeeded(actions: MockParsedAction[], originalTex
 
 function normalizeParsedActions(actions: MockParsedAction[], originalText: string) {
   return addImplicitEventActionIfNeeded(addImplicitStudyActionIfNeeded(actions, originalText), originalText).map((action) =>
-    normalizeDailyCheckinAction(
-      normalizeGenerateScheduleAction(
-        normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+    normalizeAdjustTodayAction(
+      normalizeDailyCheckinAction(
+        normalizeGenerateScheduleAction(
+          normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+          originalText,
+        ),
         originalText,
       ),
-      originalText,
     ),
   );
 }
@@ -961,11 +976,16 @@ async function executeDailyCheckin(userId: string, action: MockParsedAction) {
   return result.value;
 }
 
+async function executeAdjustToday(userId: string) {
+  return getTodayScheduleAdjustments(userId);
+}
+
 async function executeAction(userId: string, action: MockParsedAction) {
   if (action.actionType === "CREATE_TASK") return executeCreateTask(userId, action);
   if (action.actionType === "CREATE_EVENT") return executeCreateEvent(userId, action);
   if (action.actionType === "UPDATE_TASK") return executeUpdateTask(userId, action);
   if (action.actionType === "DAILY_CHECKIN") return executeDailyCheckin(userId, action);
+  if (action.actionType === "ADJUST_TODAY") return executeAdjustToday(userId);
   return executeGenerateSchedule(userId, action);
 }
 

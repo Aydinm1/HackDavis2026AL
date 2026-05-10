@@ -51,6 +51,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Calendar page loads Prisma data and supports soft-delete for calendar events.
 - [x] Chat can answer read-only weekday priority questions, such as "what is my highest priority task Monday", without creating schedule actions.
 - [x] Chat treats schedule generation as a confirmable AI action before creating scheduled blocks.
+- [x] Chat can trigger `ADJUST_TODAY` and show daily schedule adjustment results.
 - [x] Chat can prompt for missing daily check-ins and save inline energy/stress check-ins from natural language.
 - [x] Chat maps natural-language check-in phrases like low energy, calm, overwhelmed, high stress, and max stress into 1-7 scores.
 - [x] Root page `/` renders the Today dashboard by default.
@@ -175,6 +176,9 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [x] replace with lower-load task
 - [x] Do not mutate accepted blocks without confirmation.
 - [x] Create `AiInsight` explaining the adjustment.
+- [x] Add dashboard button for `POST /api/schedule/adjust-today`.
+- [x] Add chat `ADJUST_TODAY` action path for "adjust today" / "make today easier" requests.
+- [x] Prompt for daily check-in before adjustment when today's check-in is missing.
 
 ## Priority 1: Real Google Calendar Connection
 
@@ -287,6 +291,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [x] next calendar event
   - [x] AI insights
 - [x] Add check-in form.
+- [x] Add Adjust Today button and render schedule adjustment suggestions.
 - [x] Show lighter-plan/recovery insight from stored AI insights when available.
 
 ### Tasks Page
@@ -320,6 +325,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Add edit payload before confirm.
 - [x] Answer read-only task priority questions using DB data without creating AiAction rows.
 - [x] Propose schedule generation through chat before running the scheduler.
+- [x] Show adjust-today action results in chat.
 - [ ] Support image and voice upload flow.
 
 ### Upload Confirmation
