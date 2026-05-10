@@ -41,6 +41,7 @@ type AiAction = {
     | "CREATE_TASK"
     | "CREATE_EVENT"
     | "UPDATE_TASK"
+    | "UPDATE_EVENT"
     | "GENERATE_SCHEDULE"
     | "DAILY_CHECKIN"
     | "ADJUST_TODAY";
@@ -169,6 +170,22 @@ function formatDateTime(value: unknown) {
   }).format(date);
 }
 
+function actionTheme(actionType: AiAction["actionType"]) {
+  if (actionType === "CREATE_EVENT" || actionType === "UPDATE_EVENT") {
+    return { rgb: "183, 38, 193", border: "border-[#B726C1]/20" };
+  }
+
+  if (
+    actionType === "DAILY_CHECKIN" ||
+    actionType === "ADJUST_TODAY" ||
+    actionType === "GENERATE_SCHEDULE"
+  ) {
+    return { rgb: "54, 181, 57", border: "border-[#36B539]/20" };
+  }
+
+  return { rgb: "61, 149, 169", border: "border-[#3D95A9]/20" };
+}
+
 function ActionCard({
   action,
   onConfirm,
@@ -192,10 +209,19 @@ function ActionCard({
   const dLevel = difficultyLevel(p.cognitiveLoad);
   const canConfirm = action.status === "proposed" && !p.ambiguous;
   const canCancel = action.status === "proposed";
+  const theme = actionTheme(action.actionType);
 
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#101010] p-4">
-      <div className="flex items-start justify-between gap-3">
+    <div className={`relative overflow-hidden rounded-2xl border ${theme.border} bg-[#101010] p-4`}>
+      <div
+        className="pointer-events-none absolute -right-16 -top-20 h-72 w-72"
+        style={{
+          borderRadius: "288.813px",
+          background: `linear-gradient(199deg, rgba(${theme.rgb}, 0.20) 32.23%, rgba(${theme.rgb}, 0.00) 101.41%)`,
+          filter: "blur(55px)",
+        }}
+      />
+      <div className="relative z-10 flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-[#F5F5F5]">{title}</p>
           {dateLabel && (
@@ -211,16 +237,16 @@ function ActionCard({
         )}
       </div>
       {(pLevel || dLevel) && (
-        <div className="mt-3 flex flex-wrap items-center gap-5">
+        <div className="relative z-10 mt-3 flex flex-wrap items-center gap-5">
           <Indicator level={pLevel} suffix="Priority" />
           <Indicator level={dLevel} suffix="Difficulty" />
         </div>
       )}
       {action.errorMessage && (
-        <p className="mt-3 text-xs text-red-400">{action.errorMessage}</p>
+        <p className="relative z-10 mt-3 text-xs text-red-400">{action.errorMessage}</p>
       )}
       {(canConfirm || canCancel) && (
-        <div className="mt-3 flex justify-end gap-2">
+        <div className="relative z-10 mt-3 flex justify-end gap-2">
           {canCancel && (
             <button
               type="button"
@@ -244,7 +270,7 @@ function ActionCard({
         </div>
       )}
       {action.status === "executed" && (
-        <p className="mt-2 text-[10px] uppercase tracking-wide text-emerald-500">Saved</p>
+        <p className="relative z-10 mt-2 text-[10px] uppercase tracking-wide text-emerald-500">Saved</p>
       )}
     </div>
   );

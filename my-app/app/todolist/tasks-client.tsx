@@ -1188,9 +1188,18 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
                     openEditForm(task);
                   }
                 }}
-                className="relative block w-full touch-pan-y rounded-2xl border border-white/5 bg-[#101010] p-4 text-left transition-colors hover:bg-white/5"
+                className="relative block w-full touch-pan-y overflow-hidden rounded-2xl border border-[#3D95A9]/20 bg-[#101010] p-4 text-left transition-colors hover:bg-white/5"
               >
-                <div className="flex items-start justify-between gap-3">
+                <div
+                  className="pointer-events-none absolute -right-16 -top-20 h-72 w-72"
+                  style={{
+                    borderRadius: "288.813px",
+                    background:
+                      "linear-gradient(199deg, rgba(61, 149, 169, 0.20) 32.23%, rgba(61, 149, 169, 0.00) 101.41%)",
+                    filter: "blur(55px)",
+                  }}
+                />
+                <div className="relative z-10 flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-[#F5F5F5]">{task.title}</p>
                     {task.dueAt && (
@@ -1206,7 +1215,7 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
                   )}
                 </div>
                 {(pLevel || dLevel) && (
-                  <div className="mt-3 flex flex-wrap items-center gap-5">
+                  <div className="relative z-10 mt-3 flex flex-wrap items-center gap-5">
                     <Indicator level={pLevel} suffix="Priority" />
                     <Indicator level={dLevel} suffix="Difficulty" />
                   </div>
