@@ -811,7 +811,8 @@ export default function ChatPage() {
                 <img
                   src={img.dataUrl}
                   alt={`Image ${i + 1}`}
-                  className="h-16 w-16 rounded-xl object-cover border border-zinc-200"
+                  className="h-16 w-16 rounded-xl object-cover border border-zinc-200 cursor-zoom-in"
+                  onClick={() => setLightboxSrc(img.dataUrl)}
                 />
                 <button
                   type="button"
