@@ -5,6 +5,16 @@ import EnergyCircle from "./energy-circle";
 import PastEnergyHistory from "./past-energy-history";
 import WeeklyAiInsights from "./weekly-ai-insights";
 
+const energyGradients: Record<number, string> = {
+  1: "linear-gradient(62deg, #F1A19D 28.5%, #D25A54 64.28%, #921D17 117.91%)",
+  2: "linear-gradient(45deg, #E4B886 8.9%, #F69221 53.82%, #A86416 85.88%)",
+  3: "linear-gradient(110deg, #EADA98 5.97%, #F0D14F 47.45%, #CCA608 88.94%)",
+  4: "linear-gradient(231deg, #ADE09B 21.19%, #6BC94A 67.47%, #348717 113.75%)",
+  5: "linear-gradient(153deg, #87C9CA 29.99%, #45C5C7 57.12%, #069699 82.95%)",
+  6: "linear-gradient(180deg, #AAB6D8 0%, #748EDA 50%, #405592 100%)",
+  7: "linear-gradient(180deg, #D7A5DD 0%, #CA65D6 50%, #9F1AAF 100%)",
+};
+
 export interface EnergyData {
   todayEnergy: number | null;
   todayStress: number | null;
@@ -159,45 +169,75 @@ export default function EnergyInsightsClient() {
             </div>
 
             <div className="mt-6 space-y-5">
-              <label className="grid gap-2 text-sm text-white/70">
-                <span className="flex items-center justify-between">
-                  Energy
-                  <span className="text-white">{energyScore}/7</span>
-                </span>
-                <input
-                  type="range"
-                  min="1"
-                  max="7"
-                  step="1"
-                  value={energyScore}
-                  onChange={(event) => setEnergyScore(Number(event.target.value))}
-                  className="h-2 w-full accent-[#45C5C7]"
-                />
-                <span className="flex justify-between text-xs text-white/35">
-                  <span>drained</span>
-                  <span>energized</span>
-                </span>
-              </label>
+<label className="grid gap-2 text-sm text-white/70">
+  <span className="flex items-center justify-between">
+    Energy
+    <span className="text-white">{energyScore}/7</span>
+  </span>
+  <input
+    type="range"
+    min="1"
+    max="7"
+    step="1"
+    value={energyScore}
+    onChange={(event) => setEnergyScore(Number(event.target.value))}
+    className="slider-rect-thumb h-2 w-full cursor-pointer appearance-none rounded-full [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:shadow-md"
+    style={{
+      background: "linear-gradient(90deg, rgba(95, 182, 96, 0.65) 0%, rgba(135, 183, 95, 0.65) 8%, rgba(175, 184, 93, 0.65) 24%, rgba(255, 186, 90, 0.65) 48%, rgba(255, 128, 128, 0.65) 85%)",
+      border: "1px solid #ffffff3a",
+      WebkitAppearance: "none",
+    }}
+  />
+  <style>{`
+    .slider-rect-thumb::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 26px;
+      border-radius: 4px;
+      background: #E3E3E3;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      cursor: pointer;
+    }
+    .slider-rect-thumb::-moz-range-thumb {
+      width: 14px;
+      height: 26px;
+      border-radius: 4px;
+      background: #E3E3E3;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      cursor: pointer;
+      border: none;
+    }
+  `}</style>
+  <span className="flex justify-between text-xs text-white/35">
+    <span>drained</span>
+    <span>energized</span>
+  </span>
+</label>
 
-              <label className="grid gap-2 text-sm text-white/70">
-                <span className="flex items-center justify-between">
-                  Stress
-                  <span className="text-white">{stressScore}/7</span>
-                </span>
-                <input
-                  type="range"
-                  min="1"
-                  max="7"
-                  step="1"
-                  value={stressScore}
-                  onChange={(event) => setStressScore(Number(event.target.value))}
-                  className="h-2 w-full accent-[#B726C1]"
-                />
-                <span className="flex justify-between text-xs text-white/35">
-                  <span>calm</span>
-                  <span>overloaded</span>
-                </span>
-              </label>
+<label className="grid gap-2 text-sm text-white/70">
+  <span className="flex items-center justify-between">
+    Stress
+    <span className="text-white">{stressScore}/7</span>
+  </span>
+  <input
+    type="range"
+    min="1"
+    max="7"
+    step="1"
+    value={stressScore}
+    onChange={(event) => setStressScore(Number(event.target.value))}
+    className="slider-rect-thumb h-2 w-full cursor-pointer appearance-none rounded-full [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:shadow-md"
+    style={{
+      background: "linear-gradient(90deg, rgba(255, 128, 128, 0.65) 0%, rgba(231, 170, 85, 0.65) 15.93%, rgba(247, 233, 125, 0.65) 33.83%, rgba(119, 226, 120, 0.65) 54.45%, rgba(84, 186, 209, 0.65) 75.06%, rgba(219, 136, 225, 0.65) 100%)",
+      border: "1px solid #b4b4b452",
+      WebkitAppearance: "none",
+    }}
+  />
+  <span className="flex justify-between text-xs text-white/35">
+    <span>calm</span>
+    <span>overloaded</span>
+  </span>
+</label>
 
               <label className="grid gap-2 text-sm text-white/70">
                 Notes
