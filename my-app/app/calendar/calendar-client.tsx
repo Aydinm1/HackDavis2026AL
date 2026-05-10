@@ -129,15 +129,14 @@ export function CalendarClient({
   selectedDayName: string;
 }) {
   const router = useRouter();
-  const [items] = useState(initialItems);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<TaskFormState>(defaultFormState);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sortedItems = useMemo(
-    () => [...items].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime)),
-    [items],
+    () => [...initialItems].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime)),
+    [initialItems],
   );
 
   const { hours, gapsByHour } = useMemo(() => {
