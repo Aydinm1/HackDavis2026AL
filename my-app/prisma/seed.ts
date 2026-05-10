@@ -72,6 +72,45 @@ const tasks = [
   },
 ];
 
+const completedTasks = [
+  {
+    id: "demo_task_yesterday_bio_quiz_review",
+    title: "Review biology quiz notes",
+    description: "Re-read photosynthesis notes and finish the short Canvas practice quiz.",
+    type: "school",
+    workType: "study",
+    dueAt: new Date("2026-05-09T18:00:00-07:00"),
+    priority: 2,
+    cognitiveLoad: 4,
+    estimatedMinutes: 60,
+    actualMinutes: 55,
+  },
+  {
+    id: "demo_task_yesterday_history_sources",
+    title: "Annotate history essay sources",
+    description: "Mark useful quotes from the postwar housing readings before drafting.",
+    type: "school",
+    workType: "reading",
+    dueAt: new Date("2026-05-09T21:00:00-07:00"),
+    priority: 3,
+    cognitiveLoad: 4,
+    estimatedMinutes: 75,
+    actualMinutes: 70,
+  },
+  {
+    id: "demo_task_yesterday_laundry",
+    title: "Do laundry before the week starts",
+    description: "Wash clothes and set out gym clothes for Monday.",
+    type: "personal",
+    workType: "admin",
+    dueAt: new Date("2026-05-09T20:00:00-07:00"),
+    priority: 5,
+    cognitiveLoad: 1,
+    estimatedMinutes: 45,
+    actualMinutes: 40,
+  },
+];
+
 const calendarEvents = [
   {
     id: "demo_event_chem_lecture",
@@ -104,6 +143,33 @@ const calendarEvents = [
     location: "Chemistry Annex Lab 3",
     startTime: new Date("2026-05-13T13:00:00-07:00"),
     endTime: new Date("2026-05-13T15:50:00-07:00"),
+  },
+];
+
+const yesterdayCalendarEvents = [
+  {
+    id: "demo_event_yesterday_bio_discussion",
+    externalEventId: "demo-bio-discussion-2026-05-09",
+    title: "BIS 2B discussion",
+    location: "Sciences Lab Building 102",
+    startTime: new Date("2026-05-09T10:00:00-07:00"),
+    endTime: new Date("2026-05-09T10:50:00-07:00"),
+  },
+  {
+    id: "demo_event_yesterday_group_meeting",
+    externalEventId: "demo-cs-group-meeting-2026-05-09",
+    title: "CS project group meeting",
+    location: "Shields Library study room",
+    startTime: new Date("2026-05-09T13:30:00-07:00"),
+    endTime: new Date("2026-05-09T14:30:00-07:00"),
+  },
+  {
+    id: "demo_event_yesterday_dinner",
+    externalEventId: "demo-dinner-with-roommates-2026-05-09",
+    title: "Dinner with roommates",
+    location: "Downtown Davis",
+    startTime: new Date("2026-05-09T18:30:00-07:00"),
+    endTime: new Date("2026-05-09T19:30:00-07:00"),
   },
 ];
 
@@ -204,7 +270,38 @@ async function main() {
     });
   }
 
-  for (const event of calendarEvents) {
+  for (const task of completedTasks) {
+    await prisma.task.upsert({
+      where: { id: task.id },
+      update: {
+        planningCycleId,
+        title: task.title,
+        description: task.description,
+        type: task.type,
+        workType: task.workType,
+        timeframe: "weekly",
+        status: "completed",
+        dueAt: task.dueAt,
+        priority: task.priority,
+        cognitiveLoad: task.cognitiveLoad,
+        estimatedMinutes: task.estimatedMinutes,
+        actualMinutes: task.actualMinutes,
+        canSplit: true,
+        createdBy: "user",
+      },
+      create: {
+        ...task,
+        userId: DEMO_USER_ID,
+        planningCycleId,
+        timeframe: "weekly",
+        status: "completed",
+        canSplit: true,
+        createdBy: "user",
+      },
+    });
+  }
+
+  for (const event of [...yesterdayCalendarEvents, ...calendarEvents]) {
     await prisma.calendarEvent.upsert({
       where: {
         userId_provider_externalEventId: {
@@ -233,6 +330,114 @@ async function main() {
       },
     });
   }
+
+  await prisma.scheduledBlock.upsert({
+    where: { id: "demo_block_yesterday_bio_quiz_review" },
+    update: {
+      planningCycleId,
+      taskId: "demo_task_yesterday_bio_quiz_review",
+      title: "Biology quiz review",
+      startTime: new Date("2026-05-09T11:15:00-07:00"),
+      endTime: new Date("2026-05-09T12:10:00-07:00"),
+      status: "completed",
+      createdBy: "agent",
+      source: "scheduler",
+      schedulingReason: "Placed right after discussion while the biology material was fresh.",
+      scheduleScore: 0.82,
+      energyMatchScore: 0.78,
+      deadlineUrgencyScore: 0.7,
+      cognitiveBalanceScore: 0.86,
+    },
+    create: {
+      id: "demo_block_yesterday_bio_quiz_review",
+      userId: DEMO_USER_ID,
+      planningCycleId,
+      taskId: "demo_task_yesterday_bio_quiz_review",
+      title: "Biology quiz review",
+      startTime: new Date("2026-05-09T11:15:00-07:00"),
+      endTime: new Date("2026-05-09T12:10:00-07:00"),
+      status: "completed",
+      createdBy: "agent",
+      source: "scheduler",
+      schedulingReason: "Placed right after discussion while the biology material was fresh.",
+      scheduleScore: 0.82,
+      energyMatchScore: 0.78,
+      deadlineUrgencyScore: 0.7,
+      cognitiveBalanceScore: 0.86,
+    },
+  });
+
+  await prisma.scheduledBlock.upsert({
+    where: { id: "demo_block_yesterday_history_sources" },
+    update: {
+      planningCycleId,
+      taskId: "demo_task_yesterday_history_sources",
+      title: "History source annotations",
+      startTime: new Date("2026-05-09T15:15:00-07:00"),
+      endTime: new Date("2026-05-09T16:25:00-07:00"),
+      status: "completed",
+      createdBy: "agent",
+      source: "scheduler",
+      schedulingReason: "Medium-load reading block placed after the group meeting with a short break.",
+      scheduleScore: 0.8,
+      energyMatchScore: 0.76,
+      deadlineUrgencyScore: 0.64,
+      cognitiveBalanceScore: 0.84,
+    },
+    create: {
+      id: "demo_block_yesterday_history_sources",
+      userId: DEMO_USER_ID,
+      planningCycleId,
+      taskId: "demo_task_yesterday_history_sources",
+      title: "History source annotations",
+      startTime: new Date("2026-05-09T15:15:00-07:00"),
+      endTime: new Date("2026-05-09T16:25:00-07:00"),
+      status: "completed",
+      createdBy: "agent",
+      source: "scheduler",
+      schedulingReason: "Medium-load reading block placed after the group meeting with a short break.",
+      scheduleScore: 0.8,
+      energyMatchScore: 0.76,
+      deadlineUrgencyScore: 0.64,
+      cognitiveBalanceScore: 0.84,
+    },
+  });
+
+  await prisma.scheduledBlock.upsert({
+    where: { id: "demo_block_yesterday_laundry" },
+    update: {
+      planningCycleId,
+      taskId: "demo_task_yesterday_laundry",
+      title: "Laundry reset",
+      startTime: new Date("2026-05-09T17:00:00-07:00"),
+      endTime: new Date("2026-05-09T17:40:00-07:00"),
+      status: "completed",
+      createdBy: "user",
+      source: "manual",
+      schedulingReason: "Quick personal reset before dinner.",
+      scheduleScore: 0.68,
+      energyMatchScore: 0.9,
+      deadlineUrgencyScore: 0.35,
+      cognitiveBalanceScore: 0.92,
+    },
+    create: {
+      id: "demo_block_yesterday_laundry",
+      userId: DEMO_USER_ID,
+      planningCycleId,
+      taskId: "demo_task_yesterday_laundry",
+      title: "Laundry reset",
+      startTime: new Date("2026-05-09T17:00:00-07:00"),
+      endTime: new Date("2026-05-09T17:40:00-07:00"),
+      status: "completed",
+      createdBy: "user",
+      source: "manual",
+      schedulingReason: "Quick personal reset before dinner.",
+      scheduleScore: 0.68,
+      energyMatchScore: 0.9,
+      deadlineUrgencyScore: 0.35,
+      cognitiveBalanceScore: 0.92,
+    },
+  });
 
   await prisma.scheduledBlock.upsert({
     where: { id: "demo_block_chem_review" },

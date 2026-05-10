@@ -37,7 +37,14 @@ type ActionStatus = "proposed" | "executed" | "failed" | "cancelled";
 
 type AiAction = {
   id: string;
-  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN" | "ADJUST_TODAY";
+  actionType:
+    | "CREATE_TASK"
+    | "CREATE_EVENT"
+    | "UPDATE_TASK"
+    | "UPDATE_EVENT"
+    | "GENERATE_SCHEDULE"
+    | "DAILY_CHECKIN"
+    | "ADJUST_TODAY";
   status: ActionStatus;
   requiresConfirmation: boolean;
   inputPayload: Record<string, unknown>;
@@ -57,6 +64,7 @@ type ChatEntry = {
   actions?: AiAction[];
   imageDataUrl?: string;
   imageDataUrls?: string[];
+  metadata?: Record<string, unknown> | null;
 };
 
 type ActionResult = {
@@ -68,6 +76,7 @@ const ACTION_COLORS: Record<string, string> = {
   CREATE_TASK: "bg-violet-100 text-violet-800 border-violet-200",
   CREATE_EVENT: "bg-blue-100 text-blue-800 border-blue-200",
   UPDATE_TASK: "bg-amber-100 text-amber-800 border-amber-200",
+  UPDATE_EVENT: "bg-orange-100 text-orange-800 border-orange-200",
   GENERATE_SCHEDULE: "bg-emerald-100 text-emerald-800 border-emerald-200",
   DAILY_CHECKIN: "bg-cyan-100 text-cyan-800 border-cyan-200",
   ADJUST_TODAY: "bg-teal-100 text-teal-800 border-teal-200",
@@ -77,7 +86,8 @@ const ACTION_LABELS: Record<string, string> = {
   CREATE_TASK: "Create task",
   CREATE_EVENT: "Create event",
   UPDATE_TASK: "Update task",
-  GENERATE_SCHEDULE: "Generate schedule",
+  UPDATE_EVENT: "Update event",
+  GENERATE_SCHEDULE: "Schedule proposal",
   DAILY_CHECKIN: "Daily check-in",
   ADJUST_TODAY: "Adjust today",
 };
@@ -120,16 +130,31 @@ function PayloadRow({ label, value }: { label: string; value: unknown }) {
 }
 
 function extractFollowUpAction(action: AiAction) {
-  const proposedScheduleAction = action.resultPayload?.proposedScheduleAction;
-  if (
-    typeof proposedScheduleAction === "object" &&
-    proposedScheduleAction !== null &&
-    !Array.isArray(proposedScheduleAction)
-  ) {
-    return proposedScheduleAction as AiAction;
+  for (const key of ["proposedScheduleAction", "saveScheduleAction"]) {
+    const followUpAction = action.resultPayload?.[key];
+    if (
+      typeof followUpAction === "object" &&
+      followUpAction !== null &&
+      !Array.isArray(followUpAction)
+    ) {
+      return followUpAction as AiAction;
+    }
   }
 
   return null;
+}
+
+function formatDateTime(value: unknown) {
+  if (typeof value !== "string") return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function ActionCard({
@@ -153,6 +178,12 @@ function ActionCard({
   const canConfirm = action.status === "proposed";
   const canCancel = action.status === "proposed";
   const followUpAction = extractFollowUpAction(action);
+  const scheduleBlocks = Array.isArray(action.resultPayload?.scheduledBlocks)
+    ? (action.resultPayload.scheduledBlocks as Record<string, unknown>[])
+    : [];
+  const unscheduledTasks = Array.isArray(action.resultPayload?.unscheduledTasks)
+    ? (action.resultPayload.unscheduledTasks as Record<string, unknown>[])
+    : [];
 
   function parseDraftPayload() {
     try {
@@ -191,7 +222,33 @@ function ActionCard({
       </div>
 
       <div className="space-y-1 bg-white/60 rounded p-2">
-        {action.actionType === "ADJUST_TODAY" && action.status === "executed" && action.resultPayload ? (
+        {action.actionType === "GENERATE_SCHEDULE" && action.status === "executed" && action.resultPayload ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-zinc-700">
+              {action.resultPayload.dryRun ? "Schedule preview" : "Saved scheduled blocks"}
+            </p>
+            {scheduleBlocks.length > 0 ? (
+              scheduleBlocks.map((block, i) => (
+                <div key={String(block.id ?? `${block.title}-${i}`)} className="rounded-md border border-zinc-200 bg-white p-2">
+                  <div className="text-xs font-semibold text-zinc-900">{String(block.title ?? "Scheduled block")}</div>
+                  <div className="mt-0.5 text-xs text-zinc-600">
+                    {formatDateTime(block.startTime)} - {formatDateTime(block.endTime)}
+                  </div>
+                  {typeof block.schedulingReason === "string" && (
+                    <p className="mt-1 text-xs text-zinc-500">{block.schedulingReason}</p>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-zinc-500">No blocks fit the current schedule window.</p>
+            )}
+            {unscheduledTasks.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                {unscheduledTasks.length} task(s) could not be scheduled in this window.
+              </div>
+            )}
+          </div>
+        ) : action.actionType === "ADJUST_TODAY" && action.status === "executed" && action.resultPayload ? (
           <div className="space-y-2">
             {typeof action.resultPayload.summary === "string" && (
               <p className="text-xs text-zinc-600">{action.resultPayload.summary}</p>
@@ -271,11 +328,17 @@ function ActionCard({
           <div className="text-xs text-red-600 font-medium pt-1">✗ {action.errorMessage}</div>
         )}
         {action.status === "executed" && action.resultPayload && (
-          <div className="text-xs text-green-700 font-medium pt-1">✓ Saved to DB</div>
+          <div className="text-xs text-green-700 font-medium pt-1">
+            {action.actionType === "GENERATE_SCHEDULE" && action.resultPayload.dryRun
+              ? "✓ Preview generated"
+              : "✓ Saved to DB"}
+          </div>
         )}
         {followUpAction && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
-            Schedule impact detected. A revised schedule proposal action is ready below.
+            {action.actionType === "GENERATE_SCHEDULE"
+              ? "Review this preview. A separate Save schedule action is ready below."
+              : "Schedule impact detected. A revised schedule proposal action is ready below."}
           </div>
         )}
       </div>
@@ -322,21 +385,113 @@ function ActionCard({
   );
 }
 
+function InlineCheckinForm({ onSubmit }: { onSubmit: (text: string) => void }) {
+  const [energyScore, setEnergyScore] = useState(4);
+  const [stressScore, setStressScore] = useState(4);
+  const [note, setNote] = useState("");
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  function submitCheckin() {
+    if (isSubmitted) return;
+    const trimmedNote = note.trim();
+    setIsSubmitted(true);
+    onSubmit(`energy ${energyScore} stress ${stressScore}${trimmedNote ? ` note: ${trimmedNote}` : ""}`);
+  }
+
+  return (
+    <div className="w-full max-w-sm rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-zinc-900 shadow-sm">
+      <div className="space-y-4">
+        <label className="grid gap-2 text-xs font-medium text-zinc-700">
+          <span className="flex items-center justify-between gap-3">
+            Energy
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600">{energyScore}/7</span>
+          </span>
+          <input
+            type="range"
+            min="1"
+            max="7"
+            step="1"
+            value={energyScore}
+            disabled={isSubmitted}
+            onChange={(event) => setEnergyScore(Number(event.target.value))}
+            className="h-2 w-full accent-cyan-700"
+          />
+          <span className="flex justify-between text-[11px] font-normal text-zinc-500">
+            <span>drained</span>
+            <span>energized</span>
+          </span>
+        </label>
+
+        <label className="grid gap-2 text-xs font-medium text-zinc-700">
+          <span className="flex items-center justify-between gap-3">
+            Stress
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600">{stressScore}/7</span>
+          </span>
+          <input
+            type="range"
+            min="1"
+            max="7"
+            step="1"
+            value={stressScore}
+            disabled={isSubmitted}
+            onChange={(event) => setStressScore(Number(event.target.value))}
+            className="h-2 w-full accent-zinc-900"
+          />
+          <span className="flex justify-between text-[11px] font-normal text-zinc-500">
+            <span>calm</span>
+            <span>overloaded</span>
+          </span>
+        </label>
+
+        <label className="grid gap-2 text-xs font-medium text-zinc-700">
+          Notes
+          <textarea
+            value={note}
+            disabled={isSubmitted}
+            onChange={(event) => setNote(event.target.value)}
+            rows={3}
+            placeholder="Optional context for today's plan"
+            className="resize-none rounded-md border border-cyan-100 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-cyan-400"
+          />
+        </label>
+
+        <button
+          type="button"
+          onClick={submitCheckin}
+          disabled={isSubmitted}
+          className="w-full rounded-md bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:bg-zinc-400"
+        >
+          {isSubmitted ? "Check-in sent" : "Confirm check-in"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Message({
   entry,
   onConfirm,
   onCancel,
+  onCheckinSubmit,
   pendingActionIds,
   onImageClick,
 }: {
   entry: ChatEntry;
   onConfirm: (actionId: string, inputPayload?: Record<string, unknown>) => void;
   onCancel: (actionId: string) => void;
+  onCheckinSubmit: (text: string) => void;
   pendingActionIds: Set<string>;
   onImageClick: (src: string) => void;
 }) {
   const isUser = entry.role === "user";
   const imageUrls = entry.imageDataUrls ?? (entry.imageDataUrl ? [entry.imageDataUrl] : []);
+  const visibleActions = entry.actions?.filter((action) => action.inputPayload.missingBeforeSchedule !== true) ?? [];
+  const showCheckinForm =
+    !isUser &&
+    (entry.metadata?.checkinPrompt === true ||
+      entry.actions?.some(
+        (action) => action.actionType === "DAILY_CHECKIN" && action.inputPayload.missingBeforeSchedule === true,
+      ));
   return (
     <div className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
       {imageUrls.length > 0 && (
@@ -365,9 +520,11 @@ function Message({
         </div>
       )}
 
-      {entry.actions && entry.actions.length > 0 && (
+      {showCheckinForm && <InlineCheckinForm onSubmit={onCheckinSubmit} />}
+
+      {visibleActions.length > 0 && (
         <div className="w-full max-w-sm space-y-2">
-          {entry.actions.map((action) => (
+          {visibleActions.map((action) => (
             <ActionCard
               key={action.id}
               action={action}
@@ -404,6 +561,7 @@ type DbMessage = {
   id: string;
   role: string;
   content: string;
+  metadata: unknown;
   aiActions: DbAiAction[];
 };
 
@@ -425,6 +583,9 @@ function dbMessageToChatEntry(msg: DbMessage): ChatEntry | null {
   return {
     role: msg.role as "user" | "assistant",
     content: msg.content,
+    metadata: (typeof msg.metadata === "object" && msg.metadata !== null && !Array.isArray(msg.metadata)
+      ? msg.metadata
+      : null) as Record<string, unknown> | null,
     actions: actions.length > 0 ? actions : undefined,
   };
 }
@@ -694,7 +855,14 @@ export default function ChatPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: trimmed, threadId }),
         });
-        const json = await res.json() as { data?: { thread: { id: string }; assistantMessage: { content: string }; actions: AiAction[] }; error?: string };
+        const json = await res.json() as {
+          data?: {
+            thread: { id: string };
+            assistantMessage: { content: string; metadata?: unknown };
+            actions: AiAction[];
+          };
+          error?: string;
+        };
         if (!res.ok || !json.data) {
           setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Something went wrong." }]);
           return;
@@ -718,6 +886,12 @@ export default function ChatPage() {
             {
               role: "assistant" as const,
               content: assistantMessage.content,
+              metadata:
+                typeof assistantMessage.metadata === "object" &&
+                assistantMessage.metadata !== null &&
+                !Array.isArray(assistantMessage.metadata)
+                  ? (assistantMessage.metadata as Record<string, unknown>)
+                  : null,
               actions: brandNewActions.length > 0 ? brandNewActions : undefined,
             },
           ];
@@ -836,6 +1010,7 @@ export default function ChatPage() {
             entry={entry}
             onConfirm={(actionId, inputPayload) => void updateAction(actionId, "confirm", inputPayload)}
             onCancel={(actionId) => void updateAction(actionId, "cancel")}
+            onCheckinSubmit={(text) => void send(text)}
             pendingActionIds={pendingActionIds}
             onImageClick={setLightboxSrc}
           />

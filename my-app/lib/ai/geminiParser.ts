@@ -7,6 +7,7 @@ const VALID_ACTION_TYPES = new Set([
   "CREATE_TASK",
   "CREATE_EVENT",
   "UPDATE_TASK",
+  "UPDATE_EVENT",
   "GENERATE_SCHEDULE",
   "DAILY_CHECKIN",
   "ADJUST_TODAY",
@@ -19,7 +20,15 @@ const responseSchema = {
     properties: {
       actionType: {
         type: "STRING",
-        enum: ["CREATE_TASK", "CREATE_EVENT", "UPDATE_TASK", "GENERATE_SCHEDULE", "DAILY_CHECKIN", "ADJUST_TODAY"],
+        enum: [
+          "CREATE_TASK",
+          "CREATE_EVENT",
+          "UPDATE_TASK",
+          "UPDATE_EVENT",
+          "GENERATE_SCHEDULE",
+          "DAILY_CHECKIN",
+          "ADJUST_TODAY",
+        ],
       },
       requiresConfirmation: { type: "BOOLEAN" },
       ambiguous: { type: "BOOLEAN" },
@@ -38,7 +47,8 @@ const responseSchema = {
           startTime: { type: "STRING" },
           endTime: { type: "STRING" },
           isAllDay: { type: "BOOLEAN" },
-          operation: { type: "STRING", enum: ["complete", "move"] },
+          operation: { type: "STRING", enum: ["complete", "move", "update_fields", "cancel"] },
+          relativeMinutes: { type: "NUMBER" },
           energyScore: { type: "NUMBER" },
           stressScore: { type: "NUMBER" },
           availableCapacityMinutes: { type: "NUMBER" },
@@ -56,7 +66,7 @@ const responseSchema = {
 const VALID_TYPES = new Set(["school", "work", "personal", "health", "chores"]);
 const VALID_WORK_TYPES = new Set(["focus", "study", "admin", "creative", "physical"]);
 const VALID_TIMEFRAMES = new Set(["daily", "weekly", "monthly"]);
-const VALID_OPERATIONS = new Set(["complete", "move"]);
+const VALID_OPERATIONS = new Set(["complete", "move", "update_fields", "cancel"]);
 
 function sanitizePayload(raw: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...raw };
@@ -164,16 +174,23 @@ async function callGeminiTranscribe(modelName: string, parts: Part[]): Promise<s
   return (response.text ?? "").trim();
 }
 
-export async function parseGeminiChatMessage(content: string): Promise<MockParsedAction[]> {
+export async function parseGeminiChatMessage(
+  content: string,
+  options: { correctionExamples?: unknown[] } = {},
+): Promise<MockParsedAction[]> {
   const today = new Date().toISOString().slice(0, 10);
+  const correctionExamples = options.correctionExamples?.length
+    ? `\n\nRecent user-specific parser corrections. Use these as examples when similar wording appears; do not copy unrelated details:\n${JSON.stringify(options.correctionExamples).slice(0, 4000)}`
+    : "";
 
   const systemInstruction = `You are an AI assistant that extracts structured actions from user messages.
 Today's date is ${today}.
 
-You support exactly 6 action types:
+You support exactly 7 action types:
 - CREATE_TASK: User wants to add a task they need to do.
 - CREATE_EVENT: User wants to add a calendar event (fixed time block).
 - UPDATE_TASK: User wants to complete, move, or modify an existing task.
+- UPDATE_EVENT: User wants to move, cancel, reschedule, or modify an existing calendar event.
 - GENERATE_SCHEDULE: User wants a schedule or day plan generated.
 - DAILY_CHECKIN: User reports today's energy/stress or responds to a check-in prompt.
 - ADJUST_TODAY: User wants today's existing schedule made lighter, adjusted, or rebalanced based on stress/energy.
@@ -199,6 +216,14 @@ For UPDATE_TASK, extract:
 - title: task name being updated
 - rawText: original user text
 
+For UPDATE_EVENT, extract:
+- operation: "move", "update_fields", or "cancel"
+- title: event name being updated
+- startTime: ISO 8601 string for a new absolute start time, if given
+- endTime: ISO 8601 string for a new absolute end time, if given
+- relativeMinutes: integer minute offset for relative shifts, if given (one hour ahead = -60)
+- rawText: original user text
+
 For GENERATE_SCHEDULE, extract:
 - rawText: original user text
 
@@ -221,11 +246,11 @@ Rules:
 - Interpret all colloquial, slang, and informal expressions as social plans or tasks. "beat [someone] up", "link up", "hang with", "kick it with", "chill with", "vibe with", "pull up on", "see [someone]" all mean meeting/socializing → CREATE_EVENT.
 - Social plans with a time are CREATE_EVENT with a descriptive title using the person's name (e.g. "Hang with Raghav").
 - Set ambiguous: true if required fields for the action type are missing. DAILY_CHECKIN requires both energyScore and stressScore.
-- Set requiresConfirmation: true for UPDATE_TASK, GENERATE_SCHEDULE, and ambiguous actions.
+- Set requiresConfirmation: true for UPDATE_TASK, UPDATE_EVENT, GENERATE_SCHEDULE, and ambiguous actions.
 - Set requiresConfirmation: false for complete DAILY_CHECKIN actions.
 - Set requiresConfirmation: false for ADJUST_TODAY actions.
 - Write a short, friendly assistantSummary confirming or clarifying the action.
-- Do not hallucinate tasks that have no basis in the message.`;
+- Do not hallucinate tasks that have no basis in the message.${correctionExamples}`;
 
   const models = getGeminiModels();
 
@@ -268,10 +293,11 @@ export async function parseGeminiMultimodal(
   const today = new Date().toISOString().slice(0, 10);
 
   const actionRules = `
-You support exactly 6 action types:
+You support exactly 7 action types:
 - CREATE_TASK: A task the user needs to do.
 - CREATE_EVENT: A fixed calendar event with a time.
 - UPDATE_TASK: Completing, moving, or modifying an existing task.
+- UPDATE_EVENT: Moving, cancelling, rescheduling, or modifying an existing calendar event.
 - GENERATE_SCHEDULE: A request to generate a daily plan or schedule.
 - DAILY_CHECKIN: Today's energy/stress check-in from text or transcript.
 - ADJUST_TODAY: User wants today's existing schedule made lighter, adjusted, or rebalanced based on stress/energy.
@@ -297,6 +323,14 @@ For UPDATE_TASK, extract:
 - title: task name being updated
 - rawText: original user text
 
+For UPDATE_EVENT, extract:
+- operation: "move", "update_fields", or "cancel"
+- title: event name
+- startTime: ISO 8601 string for a new absolute start time, if given
+- endTime: ISO 8601 string for a new absolute end time, if given
+- relativeMinutes: integer minute offset for relative shifts, if given (one hour ahead = -60)
+- rawText: original user text
+
 For GENERATE_SCHEDULE, extract:
 - rawText: original user text
 
@@ -315,7 +349,7 @@ Rules:
 - Return an empty array [] if no actionable intent is found.
 - If the previous assistant proposed an ambiguous CREATE_TASK and the user is supplying missing fields like difficulty, priority, or duration, return a CREATE_TASK with the merged fields, not UPDATE_TASK. UPDATE_TASK is only for tasks that already exist in the database.
 - Set ambiguous: true if required fields are missing. DAILY_CHECKIN requires both energyScore and stressScore.
-- Set requiresConfirmation: true for UPDATE_TASK and ambiguous actions.
+- Set requiresConfirmation: true for UPDATE_TASK, UPDATE_EVENT, and ambiguous actions.
 - Set requiresConfirmation: false for complete DAILY_CHECKIN actions.
 - Set requiresConfirmation: false for ADJUST_TODAY actions.
 - Write a short, friendly assistantSummary confirming or clarifying the action.

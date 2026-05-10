@@ -4,10 +4,17 @@ import { parseWithBackboard } from "@/lib/ai/backboardClient";
 import {
   inferDailyEnergyScore,
   inferDailyStressScore,
+  parseMockChatMessage,
   parseDailyAvailableCapacityMinutes,
   type MockParsedAction,
 } from "@/lib/ai/mockParser";
 import { prisma } from "@/lib/db";
+import {
+  hasPayloadCorrection,
+  listAiCorrectionPromptExamples,
+  recordAiCorrectionForAction,
+} from "@/lib/services/aiCorrections";
+import { cancelCalendarEvent, updateCalendarEvent } from "@/lib/services/calendarEvents";
 import { getTodayScheduleAdjustments, upsertDailyCheckin } from "@/lib/services/checkins";
 import { generateSchedule } from "@/lib/services/scheduledBlocks";
 import { generateTaskBreakdown } from "@/lib/services/tasks";
@@ -66,6 +73,14 @@ function rejectUnknownFields(body: Record<string, unknown>, allowedFields: reado
 
 function jsonObject(value: unknown): Prisma.InputJsonObject {
   return value as Prisma.InputJsonObject;
+}
+
+function getSaveScheduleActionPayload(result: unknown) {
+  if (!isRecord(result) || !isRecord(result.saveScheduleAction) || !isRecord(result.saveScheduleAction.inputPayload)) {
+    return null;
+  }
+
+  return result.saveScheduleAction.inputPayload;
 }
 
 function clampInteger(value: number, min: number, max: number) {
@@ -571,6 +586,56 @@ function normalizeCreateEventAction(action: MockParsedAction, originalText: stri
   };
 }
 
+function normalizeUpdateEventAction(action: MockParsedAction, originalText: string): MockParsedAction {
+  if (action.actionType !== "UPDATE_EVENT") {
+    return action;
+  }
+
+  const payload = action.inputPayload;
+  const inferredWindow = inferEventWindow(originalText);
+  const title =
+    typeof payload.title === "string" && payload.title.trim()
+      ? payload.title.trim()
+      : /\bpresentation\b/i.test(originalText)
+        ? "presentation"
+        : inferEventTitle(originalText);
+  const operation =
+    typeof payload.operation === "string" && ["move", "update_fields", "cancel"].includes(payload.operation)
+      ? payload.operation
+      : /\b(?:cancel|delete)\b/i.test(originalText)
+        ? "cancel"
+        : "move";
+  const relativeMinutes =
+    typeof payload.relativeMinutes === "number"
+      ? payload.relativeMinutes
+      : /\bone hour ahead\b/i.test(originalText)
+        ? -60
+        : undefined;
+  const startTime = typeof payload.startTime === "string" ? payload.startTime : inferredWindow?.startTime.toISOString();
+  const endTime = typeof payload.endTime === "string" ? payload.endTime : inferredWindow?.endTime.toISOString();
+  const ambiguous = action.ambiguous || !title || (operation !== "cancel" && !relativeMinutes && !startTime && !endTime);
+
+  return {
+    ...action,
+    requiresConfirmation: true,
+    ambiguous,
+    inputPayload: {
+      ...payload,
+      operation,
+      title,
+      relativeMinutes,
+      startTime,
+      endTime,
+      rawText: originalText,
+    },
+    assistantSummary: ambiguous
+      ? "Which event should I update, and what should change?"
+      : operation === "cancel"
+        ? `I can cancel "${title}". Please confirm before I update your calendar.`
+        : `I can update "${title}". Please confirm before I update your calendar.`,
+  };
+}
+
 function normalizeGenerateScheduleAction(action: MockParsedAction, originalText: string): MockParsedAction {
   if (action.actionType !== "GENERATE_SCHEDULE") {
     return action;
@@ -584,9 +649,10 @@ function normalizeGenerateScheduleAction(action: MockParsedAction, originalText:
       ...action.inputPayload,
       rawText: typeof action.inputPayload.rawText === "string" ? action.inputPayload.rawText : originalText,
       trigger: typeof action.inputPayload.trigger === "string" ? action.inputPayload.trigger : "chat",
+      dryRun: typeof action.inputPayload.dryRun === "boolean" ? action.inputPayload.dryRun : true,
     },
     assistantSummary:
-      "I can generate a schedule proposal from your current tasks, fixed events, preferences, and latest check-in. Please confirm before I create new scheduled blocks.",
+      "I can preview a schedule proposal from your current tasks, fixed events, preferences, and latest check-in. Confirm to preview it before anything is saved.",
   };
 }
 
@@ -690,7 +756,10 @@ function normalizeParsedActions(actions: MockParsedAction[], originalText: strin
     normalizeAdjustTodayAction(
       normalizeDailyCheckinAction(
         normalizeGenerateScheduleAction(
-          normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+          normalizeUpdateEventAction(
+            normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+            originalText,
+          ),
           originalText,
         ),
         originalText,
@@ -700,7 +769,12 @@ function normalizeParsedActions(actions: MockParsedAction[], originalText: strin
 }
 
 function isPlanningRequest(text: string) {
-  return /\b(schedule|plan my day|plan today|generate schedule|adjust today|plan my week|replan|reschedule)\b/i.test(text);
+  return (
+    /\b(schedule|plan my day|plan today|generate schedule|adjust today|plan my week|replan|reschedule)\b/i.test(text) ||
+    /\bwhen\s+(?:would|should)\s+(?:be\s+)?(?:a\s+good\s+time\s+to\s+)?(?:i\s+)?(?:get|do|work on|study|eat)\b/i.test(
+      text,
+    )
+  );
 }
 
 async function hasDailyCheckinForToday(userId: string) {
@@ -719,20 +793,8 @@ async function hasDailyCheckinForToday(userId: string) {
   return Boolean(checkin);
 }
 
-function buildMissingCheckinPromptAction(originalText: string): MockParsedAction {
-  return {
-    actionType: "DAILY_CHECKIN",
-    requiresConfirmation: true,
-    ambiguous: true,
-    inputPayload: {
-      checkinDate: getLocalDateKey(),
-      adjustToday: true,
-      rawText: originalText,
-      missingBeforeSchedule: true,
-    },
-    assistantSummary:
-      "Before I generate or adjust today's plan, tell me your energy and stress from 1-7, like \"energy 3 stress 6\". You can include available minutes too.",
-  };
+function buildMissingCheckinPromptMessage() {
+  return 'Before I generate or adjust today\'s plan, tell me your energy and stress from 1-7, like "energy 3 stress 6". You can include available minutes too.';
 }
 
 export function validateChatMessageBody(body: unknown): ValidationResult<ChatMessageInput> {
@@ -923,6 +985,98 @@ async function executeCreateEvent(userId: string, action: MockParsedAction) {
   return { event };
 }
 
+async function findCalendarEventForUpdate(
+  userId: string,
+  payload: Record<string, unknown>,
+): Promise<{ id: string; title: string; startTime: Date; endTime: Date } | null> {
+  const eventId = typeof payload.eventId === "string" ? payload.eventId : "";
+  if (eventId) {
+    return prisma.calendarEvent.findFirst({
+      where: { id: eventId, userId, status: { not: "cancelled" } },
+      select: { id: true, title: true, startTime: true, endTime: true },
+    });
+  }
+
+  const title = typeof payload.title === "string" ? payload.title.trim() : "";
+  const startTime = typeof payload.startTime === "string" ? new Date(payload.startTime) : null;
+  const queryStart = startTime && !Number.isNaN(startTime.getTime()) ? startTime : null;
+  const dayStart = queryStart ? startOfDay(queryStart) : new Date(Date.now() - 30 * 24 * 60 * 60_000);
+  const dayEnd = queryStart ? new Date(dayStart.getTime() + 24 * 60 * 60_000) : new Date(Date.now() + 90 * 24 * 60 * 60_000);
+
+  const candidates = await prisma.calendarEvent.findMany({
+    where: {
+      userId,
+      status: { not: "cancelled" },
+      startTime: { lt: dayEnd },
+      endTime: { gt: dayStart },
+    },
+    select: { id: true, title: true, startTime: true, endTime: true },
+    orderBy: [{ startTime: "asc" }, { createdAt: "asc" }],
+  });
+
+  const matches = candidates.filter((event) => {
+    const titleMatches = title ? titleLooksSimilar(event.title, title) : false;
+    const timeMatches = queryStart ? minutesBetweenDates(event.startTime, queryStart) <= 90 : false;
+    return titleMatches || timeMatches;
+  });
+
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(`Multiple calendar events matched "${title || "that time"}". Please choose the exact event.`);
+  }
+
+  return null;
+}
+
+async function executeUpdateEvent(userId: string, action: MockParsedAction) {
+  const payload = action.inputPayload;
+  const operation = typeof payload.operation === "string" ? payload.operation : "";
+  const event = await findCalendarEventForUpdate(userId, payload);
+
+  if (!event) {
+    const title = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : "that event";
+    throw new Error(`No calendar event matched "${title}".`);
+  }
+
+  if (operation === "cancel") {
+    const result = await cancelCalendarEvent(userId, event.id);
+    if (!result.ok) throw new Error(result.error);
+    return { event: result.value };
+  }
+
+  const relativeMinutes = typeof payload.relativeMinutes === "number" ? payload.relativeMinutes : null;
+  const startTime = typeof payload.startTime === "string" ? new Date(payload.startTime) : null;
+  const endTime = typeof payload.endTime === "string" ? new Date(payload.endTime) : null;
+  const existingDuration = event.endTime.getTime() - event.startTime.getTime();
+
+  let nextStartTime: Date | undefined;
+  let nextEndTime: Date | undefined;
+
+  if (relativeMinutes !== null) {
+    const offset = Math.round(relativeMinutes) * 60_000;
+    nextStartTime = new Date(event.startTime.getTime() + offset);
+    nextEndTime = new Date(event.endTime.getTime() + offset);
+  } else if (startTime && !Number.isNaN(startTime.getTime())) {
+    nextStartTime = startTime;
+    nextEndTime = endTime && !Number.isNaN(endTime.getTime()) ? endTime : new Date(startTime.getTime() + existingDuration);
+  } else if (endTime && !Number.isNaN(endTime.getTime())) {
+    nextEndTime = endTime;
+  }
+
+  if (!nextStartTime && !nextEndTime) {
+    throw new Error("No event time update found. Specify a new time or relative move.");
+  }
+
+  const result = await updateCalendarEvent(userId, event.id, {
+    startTime: nextStartTime,
+    endTime: nextEndTime,
+    source: "chat",
+  });
+
+  if (!result.ok) throw new Error(result.error);
+  return { event: result.value };
+}
+
 async function executeUpdateTask(userId: string, action: MockParsedAction) {
   const payload = action.inputPayload;
   const operation = typeof payload.operation === "string" ? payload.operation : "";
@@ -984,15 +1138,31 @@ async function executeUpdateTask(userId: string, action: MockParsedAction) {
 
 async function executeGenerateSchedule(userId: string, action: MockParsedAction) {
   const payload = action.inputPayload;
+  const dryRun = typeof payload.dryRun === "boolean" ? payload.dryRun : true;
   const result = await generateSchedule(userId, {
     planningCycleId: typeof payload.planningCycleId === "string" ? payload.planningCycleId : undefined,
     start: typeof payload.start === "string" ? new Date(payload.start) : undefined,
     end: typeof payload.end === "string" ? new Date(payload.end) : undefined,
-    dryRun: typeof payload.dryRun === "boolean" ? payload.dryRun : undefined,
+    dryRun,
   });
 
   if (!result.ok) {
     throw new Error(result.error);
+  }
+
+  if (dryRun) {
+    return {
+      ...result.value,
+      saveScheduleAction: {
+        actionType: "GENERATE_SCHEDULE",
+        requiresConfirmation: true,
+        inputPayload: {
+          ...payload,
+          dryRun: false,
+          trigger: "save_schedule_preview",
+        },
+      },
+    };
   }
 
   return result.value;
@@ -1041,6 +1211,7 @@ async function executeAction(userId: string, action: MockParsedAction) {
   if (action.actionType === "CREATE_TASK") return executeCreateTask(userId, action);
   if (action.actionType === "CREATE_EVENT") return executeCreateEvent(userId, action);
   if (action.actionType === "UPDATE_TASK") return executeUpdateTask(userId, action);
+  if (action.actionType === "UPDATE_EVENT") return executeUpdateEvent(userId, action);
   if (action.actionType === "DAILY_CHECKIN") return executeDailyCheckin(userId, action);
   if (action.actionType === "ADJUST_TODAY") return executeAdjustToday(userId);
   return executeGenerateSchedule(userId, action);
@@ -1074,6 +1245,21 @@ async function recordAndMaybeExecuteAction(params: {
 
   try {
     const result = await executeAction(userId, action);
+    const saveScheduleActionPayload = getSaveScheduleActionPayload(result);
+    const saveScheduleAction =
+      action.actionType === "GENERATE_SCHEDULE" && saveScheduleActionPayload
+        ? await prisma.aiAction.create({
+            data: {
+              userId,
+              threadId,
+              messageId,
+              actionType: "GENERATE_SCHEDULE",
+              status: "proposed",
+              requiresConfirmation: true,
+              inputPayload: jsonObject(saveScheduleActionPayload),
+            },
+          })
+        : null;
     const proposedScheduleAction =
       action.actionType === "CREATE_TASK" && "task" in result
         ? await createScheduleImpactAction({
@@ -1084,22 +1270,40 @@ async function recordAndMaybeExecuteAction(params: {
           })
         : null;
 
-    return prisma.aiAction.update({
+    const updatedAction = await prisma.aiAction.update({
       where: { id: aiAction.id },
       data: {
         status: "executed",
-        resultPayload: jsonObject({ ...result, proposedScheduleAction }),
+        resultPayload: jsonObject({ ...result, proposedScheduleAction, saveScheduleAction }),
         executedAt: new Date(),
       },
     });
+
+    await recordAiCorrectionForAction({
+      action: updatedAction,
+      correctionType: "confirmed",
+      proposedPayload: aiAction.inputPayload,
+      finalPayload: aiAction.inputPayload,
+    });
+
+    return updatedAction;
   } catch (error) {
-    return prisma.aiAction.update({
+    const updatedAction = await prisma.aiAction.update({
       where: { id: aiAction.id },
       data: {
         status: "failed",
         errorMessage: error instanceof Error ? error.message : "Unknown action execution error.",
       },
     });
+
+    await recordAiCorrectionForAction({
+      action: updatedAction,
+      correctionType: "failed",
+      proposedPayload: aiAction.inputPayload,
+      errorMessage: updatedAction.errorMessage,
+    });
+
+    return updatedAction;
   }
 }
 
@@ -1342,15 +1546,45 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
     }
   }
 
+  const correctionExamples = process.env.BACKBOARD_API_KEY ? [] : await listAiCorrectionPromptExamples(userId);
   const rawActions = process.env.BACKBOARD_API_KEY
     ? await parseWithBackboard(input.content, thread.id)
-    : await parseGeminiChatMessage(input.content);
-  const parsedActions = normalizeParsedActions(rawActions, input.content);
+    : await parseGeminiChatMessage(input.content, { correctionExamples });
+  const fallbackActions = rawActions.length > 0 ? rawActions : parseMockChatMessage(input.content);
+  const parsedActions = normalizeParsedActions(fallbackActions, input.content);
   const shouldPromptForCheckin =
     isPlanningRequest(input.content) &&
     !parsedActions.some((action) => action.actionType === "DAILY_CHECKIN") &&
     !(await hasDailyCheckinForToday(userId));
-  const actionableParsedActions = shouldPromptForCheckin ? [buildMissingCheckinPromptAction(input.content)] : parsedActions;
+
+  if (shouldPromptForCheckin) {
+    const assistantMessage = await prisma.chatMessage.create({
+      data: {
+        userId,
+        threadId: thread.id,
+        role: "assistant",
+        content: buildMissingCheckinPromptMessage(),
+        metadata: jsonObject({ checkinPrompt: true }),
+      },
+    });
+
+    await prisma.chatThread.update({
+      where: { id: thread.id },
+      data: { updatedAt: new Date() },
+    });
+
+    return {
+      ok: true as const,
+      value: {
+        thread,
+        userMessage,
+        assistantMessage,
+        actions: [],
+      },
+    };
+  }
+
+  const actionableParsedActions = parsedActions;
   const actions = await Promise.all(
     actionableParsedActions.map((action) =>
       recordAndMaybeExecuteAction({
@@ -1450,6 +1684,8 @@ export async function confirmAiAction(
     ...(overrides.inputPayload ?? {}),
     ambiguous: false,
   };
+  const proposedPayload = aiAction.inputPayload as Record<string, unknown>;
+  const correctedPayload = overrides.inputPayload ? inputPayload : undefined;
 
   if (aiAction.actionType === "CREATE_TASK") {
     const missingFields = getMissingCreateTaskPlanningFields(inputPayload);
@@ -1482,6 +1718,21 @@ export async function confirmAiAction(
       inputPayload,
       assistantSummary: "",
     });
+    const saveScheduleActionPayload = getSaveScheduleActionPayload(result);
+    const saveScheduleAction =
+      aiAction.actionType === "GENERATE_SCHEDULE" && saveScheduleActionPayload
+        ? await prisma.aiAction.create({
+            data: {
+              userId,
+              threadId: aiAction.threadId,
+              messageId: aiAction.messageId,
+              actionType: "GENERATE_SCHEDULE",
+              status: "proposed",
+              requiresConfirmation: true,
+              inputPayload: jsonObject(saveScheduleActionPayload),
+            },
+          })
+        : null;
     const proposedScheduleAction =
       aiAction.actionType === "CREATE_TASK" && "task" in result
         ? await createScheduleImpactAction({
@@ -1497,9 +1748,17 @@ export async function confirmAiAction(
       data: {
         status: "executed",
         inputPayload: jsonObject(inputPayload),
-        resultPayload: jsonObject({ ...result, proposedScheduleAction }),
+        resultPayload: jsonObject({ ...result, proposedScheduleAction, saveScheduleAction }),
         executedAt: new Date(),
       },
+    });
+
+    await recordAiCorrectionForAction({
+      action: updatedAction,
+      correctionType: hasPayloadCorrection(proposedPayload, inputPayload) ? "edited" : "confirmed",
+      proposedPayload,
+      correctedPayload,
+      finalPayload: inputPayload,
     });
 
     return { ok: true as const, value: updatedAction };
@@ -1510,6 +1769,14 @@ export async function confirmAiAction(
         status: "failed",
         errorMessage: error instanceof Error ? error.message : "Unknown action execution error.",
       },
+    });
+
+    await recordAiCorrectionForAction({
+      action: updatedAction,
+      correctionType: "failed",
+      proposedPayload,
+      correctedPayload,
+      errorMessage: updatedAction.errorMessage,
     });
 
     return { ok: false as const, error: updatedAction.errorMessage ?? "AI action failed.", status: 400 };
@@ -1532,6 +1799,12 @@ export async function cancelAiAction(userId: string, actionId: string) {
   const updatedAction = await prisma.aiAction.update({
     where: { id: actionId },
     data: { status: "cancelled" },
+  });
+
+  await recordAiCorrectionForAction({
+    action: updatedAction,
+    correctionType: "cancelled",
+    proposedPayload: aiAction.inputPayload,
   });
 
   return { ok: true as const, value: updatedAction };
