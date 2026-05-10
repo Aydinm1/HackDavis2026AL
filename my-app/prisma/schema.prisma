@@ -16,6 +16,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   preferences     UserPreferences?
+  calendarConnections CalendarConnection[]
   planningCycles  PlanningCycle[]
   tasks           Task[]
   taskBreakdowns  TaskBreakdown[]
@@ -170,6 +171,28 @@ model CalendarEvent {
 
   @@unique([userId, provider, externalEventId])
   @@index([userId, startTime, endTime])
+}
+
+model CalendarConnection {
+  id     String @id @default(cuid())
+  userId String
+
+  provider   String @default("google")
+  calendarId String @default("primary")
+
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  expiresAt             DateTime?
+  scope                 String?
+  tokenType             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, calendarId])
+  @@index([userId, provider])
 }
 
 model ScheduledBlock {

@@ -6,7 +6,7 @@ This app uses Next.js Route Handlers under `app/api`. All endpoints currently us
 demo_user_hackdavis_2026
 ```
 
-There is no real auth or Google OAuth yet. Every database query is scoped by `userId`.
+There is no real user auth yet. Demo auth still supplies the current user ID, and every database query is scoped by `userId`.
 
 Responses use:
 
@@ -204,7 +204,7 @@ Response: `201` with breakdown metadata.
 
 ## Calendar Events
 
-Calendar events are fixed busy blocks. For MVP, only manual/mock events are supported. Google OAuth is intentionally not implemented.
+Calendar events are fixed busy blocks. Manual/mock events are supported, and Google Calendar import is available through the MVP OAuth routes below.
 
 ### GET `/api/calendar/events?start=&end=`
 
@@ -298,6 +298,105 @@ Soft-deletes a user-owned manual/mock event by setting:
 ```
 
 Response: `200` with the updated event.
+
+## Google Calendar
+
+Google Calendar uses MVP/demo auth for the local app user, but real Google OAuth for calendar access.
+
+Required env vars:
+
+```text
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=http://localhost:3000/auth/google/callback
+GOOGLE_CALENDAR_SCOPES=https://www.googleapis.com/auth/calendar.readonly
+GOOGLE_TOKEN_ENCRYPTION_KEY=
+```
+
+Tokens are encrypted before being stored in `CalendarConnection`. Imported Google events are stored in `CalendarEvent` with `provider = "google"` and `source = "google_import"`, so the existing schedule/dashboard/calendar APIs treat them as fixed busy blocks.
+
+### GET `/api/calendar/google/connect`
+
+Starts Google OAuth. Opening this route in the browser redirects to Google.
+
+Use `?json=1` if the frontend wants the URL instead of an immediate redirect:
+
+```json
+{
+  "data": {
+    "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?..."
+  }
+}
+```
+
+### GET `/api/calendar/google/callback`
+
+OAuth callback route for Google. `GET /auth/google/callback` is also supported as an alias because that is the redirect URI currently configured for local OAuth.
+
+Expected query params:
+
+```text
+code=...
+state=...
+```
+
+Behavior:
+
+- Validates the signed OAuth state.
+- Exchanges the Google code for tokens.
+- Upserts a `CalendarConnection` for `provider = "google"` and `calendarId = "primary"`.
+
+Response:
+
+```json
+{
+  "data": {
+    "connectionId": "connection-id",
+    "provider": "google",
+    "calendarId": "primary",
+    "message": "Google Calendar connected. Call POST /api/calendar/google/sync to import events."
+  }
+}
+```
+
+### POST `/api/calendar/google/sync`
+
+Imports Google Calendar events into `CalendarEvent`.
+
+Optional body:
+
+```json
+{
+  "calendarId": "primary",
+  "start": "2026-05-11T00:00:00-07:00",
+  "end": "2026-06-10T00:00:00-07:00"
+}
+```
+
+Behavior:
+
+- Defaults to `calendarId = "primary"`.
+- Defaults sync range to today through 30 days from now.
+- Refreshes the Google access token when needed.
+- Imports timed and all-day events.
+- Imports cancelled Google events as `status = "cancelled"`.
+- Upserts by `[userId, provider, externalEventId]`.
+
+Response:
+
+```json
+{
+  "data": {
+    "calendarId": "primary",
+    "importedCount": 12,
+    "range": {
+      "start": "2026-05-11T07:00:00.000Z",
+      "end": "2026-06-10T07:00:00.000Z"
+    },
+    "events": []
+  }
+}
+```
 
 ## Schedule
 
@@ -944,7 +1043,7 @@ npm run seed
 ## Current MVP Limitations
 
 - Auth is mocked.
-- Google Calendar OAuth is not implemented.
+- Google Calendar OAuth is implemented, but the app still uses mocked local app auth.
 - Task breakdown generation is deterministic, not AI-generated.
 - Reschedule suggestions are simple same-day suggestions, not full optimization.
 - API writes directly to core tables; future AI actions should use confirmation flows for risky changes.

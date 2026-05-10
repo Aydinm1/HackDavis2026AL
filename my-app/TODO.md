@@ -184,56 +184,58 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### OAuth Setup
 
-- [ ] Add Google OAuth configuration.
-- [ ] Required env vars:
-  - [ ] `GOOGLE_CLIENT_ID`
-  - [ ] `GOOGLE_CLIENT_SECRET`
-  - [ ] `GOOGLE_REDIRECT_URI`
-  - [ ] `GOOGLE_CALENDAR_SCOPES`
-- [ ] Use calendar readonly scope first:
-  - [ ] `https://www.googleapis.com/auth/calendar.readonly`
-- [ ] Add routes:
-  - [ ] `GET /api/calendar/google/connect`
-  - [ ] `GET /api/calendar/google/callback`
-  - [ ] `POST /api/calendar/google/sync`
-- [ ] Store provider connection data securely.
-- [ ] Do not expose tokens to frontend.
+- [x] Add Google OAuth configuration.
+- [x] Required env vars wired:
+  - [x] `GOOGLE_CLIENT_ID`
+  - [x] `GOOGLE_CLIENT_SECRET`
+  - [x] `GOOGLE_REDIRECT_URI`
+  - [x] `GOOGLE_CALENDAR_SCOPES`
+  - [x] `GOOGLE_TOKEN_ENCRYPTION_KEY`
+- [x] Use calendar readonly scope first:
+  - [x] `https://www.googleapis.com/auth/calendar.readonly`
+- [x] Add routes:
+  - [x] `GET /api/calendar/google/connect`
+  - [x] `GET /api/calendar/google/callback`
+  - [x] `GET /auth/google/callback`
+  - [x] `POST /api/calendar/google/sync`
+- [x] Store provider connection data securely.
+- [x] Do not expose tokens to frontend.
 
 ### Data Model Decision
 
-- [ ] Decide whether to add a dedicated `CalendarConnection` table.
-- [ ] Recommended schema:
-  - [ ] `id`
-  - [ ] `userId`
-  - [ ] `provider`
-  - [ ] `accessTokenEncrypted`
-  - [ ] `refreshTokenEncrypted`
-  - [ ] `expiresAt`
-  - [ ] `calendarId`
-  - [ ] `createdAt`
-  - [ ] `updatedAt`
-- [ ] If avoiding token storage for hackathon, support a short-lived demo sync only and document limitation.
+- [x] Decide whether to add a dedicated `CalendarConnection` table.
+- [x] Recommended schema:
+  - [x] `id`
+  - [x] `userId`
+  - [x] `provider`
+  - [x] `accessTokenEncrypted`
+  - [x] `refreshTokenEncrypted`
+  - [x] `expiresAt`
+  - [x] `calendarId`
+  - [x] `createdAt`
+  - [x] `updatedAt`
+- [x] Use encrypted token storage instead of short-lived demo-only sync.
 
 ### Sync Behavior
 
-- [ ] Import Google events into `CalendarEvent`.
-- [ ] Set:
-  - [ ] `provider = "google"`
-  - [ ] `externalEventId`
-  - [ ] `calendarId`
-  - [ ] `rawProviderData`
-  - [ ] `source = "google_import"`
-  - [ ] `status`
-- [ ] Upsert using unique key `[userId, provider, externalEventId]`.
-- [ ] Handle all-day events.
-- [ ] Handle cancelled Google events by setting `status = "cancelled"`.
-- [ ] Add sync range:
-  - [ ] default: today through 30 days from now
-  - [ ] optional `start` and `end`
+- [x] Import Google events into `CalendarEvent`.
+- [x] Set:
+  - [x] `provider = "google"`
+  - [x] `externalEventId`
+  - [x] `calendarId`
+  - [x] `rawProviderData`
+  - [x] `source = "google_import"`
+  - [x] `status`
+- [x] Upsert using unique key `[userId, provider, externalEventId]`.
+- [x] Handle all-day events.
+- [x] Handle cancelled Google events by setting `status = "cancelled"`.
+- [x] Add sync range:
+  - [x] default: today through 30 days from now
+  - [x] optional `start` and `end`
 - [ ] Acceptance:
-  - [ ] User can connect Google Calendar.
-  - [ ] Imported events appear in calendar/dashboard/schedule APIs.
-  - [ ] Scheduler treats imported events as fixed busy blocks.
+  - [x] User can connect Google Calendar.
+  - [x] Imported events appear in calendar/dashboard/schedule APIs.
+  - [x] Scheduler treats imported events as fixed busy blocks.
 
 ## Priority 2: Voice And Image Setup Now
 
@@ -379,9 +381,9 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] `POST /api/schedule/generate`
 - [x] `GET /api/insights/current`
 - [x] `POST /api/insights/generate`
-- [ ] `GET /api/calendar/google/connect`
-- [ ] `GET /api/calendar/google/callback`
-- [ ] `POST /api/calendar/google/sync`
+- [x] `GET /api/calendar/google/connect`
+- [x] `GET /api/calendar/google/callback`
+- [x] `POST /api/calendar/google/sync`
 
 ## Demo Script Readiness
 
