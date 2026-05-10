@@ -47,6 +47,9 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [x] `GET /api/insights/current`
   - [x] `POST /api/insights/generate`
 - [x] Advisory planning insights for daily/weekly planning, recovery windows, and schedule-regeneration recommendations.
+- [x] Tasks page loads Prisma data and supports create, edit, and soft-delete.
+- [x] Calendar page loads Prisma data and supports soft-delete for calendar events.
+- [x] Chat can answer read-only weekday priority questions, such as "what is my highest priority task Monday", without creating schedule actions.
 - [x] Basic API documentation in `docs/API.md`.
 - [x] Validation tests in `tests/api-validation.test.ts`.
 - [x] Basic frontend placeholder pages.
@@ -55,7 +58,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 - [ ] Voice/image pipeline exists, but API and frontend need final alignment around `imageData`, `audioData`, `mimeType`, transcripts, and proposed action cards.
 - [ ] Gemini parser exists, but fallback and confidence behavior should be tightened for demo reliability.
-- [ ] Task difficulty exists as `cognitiveLoad`; backend/chat inference is started, but UI labels and manual controls are still missing.
+- [x] Task difficulty exists as `cognitiveLoad`; backend/chat inference and task-page manual controls are started.
 - [ ] Task breakdown exists, but is still deterministic/basic and not good enough for bigger tasks.
 - [x] Schedule read/update APIs exist, and MVP schedule generation is implemented.
 - [ ] Daily adjustment exists, but does not yet rewrite or propose concrete block changes.
@@ -108,12 +111,12 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 ### Task Difficulty
 
 - [x] Keep `cognitiveLoad` as the canonical difficulty field, range `1-7`.
-- [ ] Add frontend labels:
-  - [ ] `1-2`: light
-  - [ ] `3-4`: moderate
-  - [ ] `5`: hard
-  - [ ] `6-7`: deep work
-- [ ] Add UI controls for difficulty on task creation/edit.
+- [x] Add frontend labels:
+  - [x] `1-2`: light
+  - [x] `3-4`: moderate
+  - [x] `5`: hard
+  - [x] `6-7`: deep work
+- [x] Add UI controls for difficulty on task creation/edit.
 - [ ] Add sensible defaults by `workType`:
   - [ ] `study`: 5
   - [ ] `writing`: 5
@@ -126,7 +129,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [x] "easy", "quick", "simple" -> lower load
   - [x] "hard", "deep work", "project", "midterm", "essay" -> higher load
 - [ ] Tighten Gemini parser schema/prompt so model output consistently includes difficulty and estimated minutes.
-- [ ] Show cognitive load on task cards, dashboard top tasks, and schedule blocks.
+- [ ] Show cognitive load on dashboard top tasks and schedule blocks.
+- [x] Show cognitive load on task cards.
 
 ### Bigger Task Breakdown
 
@@ -282,10 +286,12 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 ### Tasks Page
 
 - [x] Wire task list to seeded task data.
-- [ ] Add task creation form.
-- [ ] Add edit/complete/cancel actions.
-- [ ] Add cognitive load control.
-- [ ] Add estimated minutes field.
+- [x] Add task creation form.
+- [x] Add edit actions.
+- [x] Add soft-delete/cancel action.
+- [ ] Add complete action.
+- [x] Add cognitive load control.
+- [x] Add estimated minutes field.
 - [ ] Add task breakdown button.
 - [x] Show breakdown rows under parent task.
 
@@ -293,6 +299,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 - [x] Wire to seeded schedule data.
 - [x] Show calendar events and scheduled blocks together.
+- [x] Add delete control for calendar events.
 - [ ] Add generate schedule button.
 - [ ] Add complete/skip/move controls for blocks.
 - [x] Show block status and scheduling reason.
@@ -304,6 +311,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Show AiAction cards.
 - [x] Add confirm/cancel buttons.
 - [x] Add edit payload before confirm.
+- [x] Answer read-only task priority questions using DB data without creating AiAction rows.
 - [ ] Support image and voice upload flow.
 
 ### Upload Confirmation
@@ -389,6 +397,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [ ] Add tests for:
   - [x] schedule generation conflict avoidance
   - [x] insight endpoint validation
+  - [x] chat next-weekday priority query behavior
   - [ ] task difficulty validation/defaults
   - [ ] task breakdown generation for large tasks
   - [ ] Google Calendar event upsert
@@ -418,10 +427,11 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 ## Recommended Next Build Order
 
 1. [ ] Wire dashboard page to APIs.
-2. [ ] Load existing chat thread history from APIs.
-3. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
-4. [ ] Finish voice/image Gemini flow and confirmation cards.
-5. [ ] Improve task difficulty UI and Gemini parser inference.
-6. [ ] Improve task breakdowns for large tasks.
-7. [ ] Add real Google Calendar OAuth/import.
-8. [ ] Add metrics queries for check-in, completion, and AI action success.
+2. [ ] Add generate schedule controls to the Calendar / Planner page.
+3. [ ] Add complete controls for task cards and scheduled blocks.
+4. [ ] Load existing chat thread history from APIs.
+5. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
+6. [ ] Finish voice/image Gemini flow and confirmation cards.
+7. [ ] Improve task breakdowns for large tasks.
+8. [ ] Add real Google Calendar OAuth/import.
+9. [ ] Add metrics queries for check-in, completion, and AI action success.

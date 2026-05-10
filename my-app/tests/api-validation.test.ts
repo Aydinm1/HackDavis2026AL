@@ -21,6 +21,7 @@ let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreate
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
 let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
 let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
+let resolveNextWeekdayDate: typeof ChatService.resolveNextWeekdayDate;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
@@ -52,6 +53,7 @@ before(async () => {
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
   validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
   validateChatMessageBody = chatService.validateChatMessageBody;
+  resolveNextWeekdayDate = chatService.resolveNextWeekdayDate;
   parseDashboardDate = dashboardService.parseDashboardDate;
   parseMockChatMessage = mockParser.parseMockChatMessage;
   validateGeminiResponse = geminiParser.validateGeminiResponse;
@@ -346,6 +348,22 @@ test("chat message validation requires content", () => {
   assert.equal(valid.ok, true);
   assert.equal(invalid.ok, false);
   assert.match(invalid.ok ? "" : invalid.error, /content is required/);
+});
+
+test("chat task priority questions resolve the next mentioned weekday", () => {
+  const result = resolveNextWeekdayDate(
+    "what to do i have to do monday whats my highest priority task",
+    new Date("2026-05-10T10:00:00-07:00"),
+  );
+
+  assert.equal(result?.weekday, "monday");
+  assert.equal(result?.date.toISOString().slice(0, 10), "2026-05-11");
+});
+
+test("mock parser does not turn read-only task questions into schedule actions", () => {
+  const actions = parseMockChatMessage("what to do i have to do monday whats my highest priority task");
+
+  assert.deepEqual(actions, []);
 });
 
 test("mock parser creates task and event actions from simple text", () => {

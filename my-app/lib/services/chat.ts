@@ -226,6 +226,167 @@ function minutesBetweenDates(a: Date, b: Date) {
   return Math.abs(a.getTime() - b.getTime()) / 60_000;
 }
 
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(date.getDate() + days);
+  return result;
+}
+
+function startOfLocalDate(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function endOfLocalDate(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0, 0, 0, 0);
+}
+
+function formatReadableDate(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+export function resolveNextWeekdayDate(text: string, baseDate = new Date()) {
+  const weekdayMatch = text.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  if (!weekdayMatch) {
+    return null;
+  }
+
+  const weekday = weekdayMatch[1].toLowerCase();
+  const targetDay = weekdayIndex[weekday];
+  const start = startOfLocalDate(baseDate);
+  const daysUntil = (targetDay - start.getDay() + 7) % 7;
+
+  return {
+    weekday,
+    date: addDays(start, daysUntil),
+  };
+}
+
+function hasWeekdayMention(text: string) {
+  return /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i.test(text);
+}
+
+function isTaskPriorityQuery(text: string) {
+  const asksQuestion = /\b(what|which|show|tell|list|find)\b/i.test(text);
+  const asksAboutWork = /\b(task|tasks|to do|todo|have to do|need to do|work on|do)\b/i.test(text);
+  const asksPriority = /\b(priority|highest|top|important|most important|what matters)\b/i.test(text);
+
+  return asksQuestion && asksAboutWork && asksPriority && hasWeekdayMention(text);
+}
+
+async function answerTaskPriorityQuery(userId: string, content: string) {
+  if (!isTaskPriorityQuery(content)) {
+    return null;
+  }
+
+  const resolved = resolveNextWeekdayDate(content);
+  if (!resolved) {
+    return "Which day should I check? You can say something like \"Monday\" or \"Friday\".";
+  }
+
+  const start = startOfLocalDate(resolved.date);
+  const end = endOfLocalDate(resolved.date);
+
+  const [dueTasks, scheduledBlocks] = await Promise.all([
+    prisma.task.findMany({
+      where: {
+        userId,
+        status: { notIn: ["completed", "cancelled"] },
+        dueAt: { gte: start, lt: end },
+      },
+      orderBy: [{ priority: "asc" }, { cognitiveLoad: "desc" }, { dueAt: "asc" }, { createdAt: "asc" }],
+    }),
+    prisma.scheduledBlock.findMany({
+      where: {
+        userId,
+        status: { notIn: ["completed", "cancelled", "skipped"] },
+        startTime: { gte: start, lt: end },
+        task: {
+          status: { notIn: ["completed", "cancelled"] },
+        },
+      },
+      include: { task: true },
+      orderBy: { startTime: "asc" },
+    }),
+  ]);
+
+  const candidates = new Map<
+    string,
+    {
+      id: string;
+      title: string;
+      priority: number;
+      cognitiveLoad: number;
+      dueAt: Date | null;
+      estimatedMinutes: number | null;
+      scheduledStart: Date | null;
+      source: "due" | "scheduled" | "due and scheduled";
+    }
+  >();
+
+  for (const task of dueTasks) {
+    candidates.set(task.id, {
+      id: task.id,
+      title: task.title,
+      priority: task.priority,
+      cognitiveLoad: task.cognitiveLoad,
+      dueAt: task.dueAt,
+      estimatedMinutes: task.estimatedMinutes,
+      scheduledStart: null,
+      source: "due",
+    });
+  }
+
+  for (const block of scheduledBlocks) {
+    if (!block.task) continue;
+
+    const existing = candidates.get(block.task.id);
+    candidates.set(block.task.id, {
+      id: block.task.id,
+      title: block.task.title,
+      priority: block.task.priority,
+      cognitiveLoad: block.task.cognitiveLoad,
+      dueAt: block.task.dueAt,
+      estimatedMinutes: block.task.estimatedMinutes,
+      scheduledStart: existing?.scheduledStart ?? block.startTime,
+      source: existing ? "due and scheduled" : "scheduled",
+    });
+  }
+
+  const sortedTasks = [...candidates.values()].sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    const aDue = a.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
+    const bDue = b.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
+    if (aDue !== bDue) return aDue - bDue;
+    if (a.cognitiveLoad !== b.cognitiveLoad) return b.cognitiveLoad - a.cognitiveLoad;
+    return (a.scheduledStart?.getTime() ?? 0) - (b.scheduledStart?.getTime() ?? 0);
+  });
+
+  const dateLabel = formatReadableDate(start);
+  if (sortedTasks.length === 0) {
+    return `Next ${resolved.weekday} is ${dateLabel}. I do not see any incomplete tasks due or scheduled for that day.`;
+  }
+
+  const topTask = sortedTasks[0];
+  const supportingDetails = [
+    `priority ${topTask.priority}/5`,
+    `difficulty ${topTask.cognitiveLoad}/7`,
+    topTask.estimatedMinutes ? `${topTask.estimatedMinutes} min estimate` : null,
+    topTask.source === "due" ? "due that day" : topTask.source === "scheduled" ? "scheduled that day" : "due and scheduled that day",
+  ].filter(Boolean);
+
+  const otherTasks = sortedTasks
+    .slice(1, 4)
+    .map((task) => `${task.title} (priority ${task.priority}/5)`);
+  const otherText = otherTasks.length > 0 ? ` Other Monday tasks: ${otherTasks.join(", ")}.` : "";
+
+  return `Next ${resolved.weekday} is ${dateLabel}. Your highest priority task is "${topTask.title}" because it is ${supportingDetails.join(", ")}.${otherText}`;
+}
+
 function buildBreakdownPreview(workType: string, estimatedMinutes: number, cognitiveLoad: number) {
   const templates: Record<string, string[]> = {
     study: ["Review notes and key concepts", "Work practice problems", "Self-test and summarize weak spots"],
@@ -717,6 +878,33 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
       content: input.content,
     },
   });
+
+  const taskQueryAnswer = await answerTaskPriorityQuery(userId, input.content);
+  if (taskQueryAnswer) {
+    const assistantMessage = await prisma.chatMessage.create({
+      data: {
+        userId,
+        threadId: thread.id,
+        role: "assistant",
+        content: taskQueryAnswer,
+      },
+    });
+
+    await prisma.chatThread.update({
+      where: { id: thread.id },
+      data: { updatedAt: new Date() },
+    });
+
+    return {
+      ok: true as const,
+      value: {
+        thread,
+        userMessage,
+        assistantMessage,
+        actions: [],
+      },
+    };
+  }
 
   const parsedActions = normalizeParsedActions(await parseGeminiChatMessage(input.content), input.content);
   const actions = await Promise.all(
