@@ -43,3 +43,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+HackDavis2026ServiceAccount.json
+HackDavis_2026_Service_Account.json
