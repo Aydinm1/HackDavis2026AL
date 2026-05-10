@@ -42,7 +42,7 @@ export default async function ToDoList() {
   );
 
   return (
-    <main className="min-h-screen bg-[#101010] px-5 py-8 pb-28 font-sans text-zinc-950">
+    <main className="min-h-screen bg-zinc-50 px-5 py-8 pb-28 font-sans text-zinc-950">
       <TasksClient initialTasks={taskViewModels} />
     </main>
   );

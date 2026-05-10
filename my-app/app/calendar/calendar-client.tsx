@@ -1,328 +1,566 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence } from "framer-motion";
-import {
-  CreateSheet,
-  buildPayload,
-  defaultFormState,
-  type TaskFormState,
-} from "@/app/todolist/tasks-client";
-
-export type WeekDay = {
-  letter: string;
-  date: string;
-  day: number;
-};
 
 export type CalendarItemViewModel = {
   id: string;
   kind: "event" | "block";
   title: string;
+  subtitle: string;
   startTime: string;
   endTime: string;
-  priority: number | null;
-  cognitiveLoad: number | null;
+  status: string;
+  taskTitle: string | null;
+  reason: string | null;
 };
 
-type Level = "high" | "medium" | "low";
-
-function priorityLevel(priority: number | null): Level | null {
-  if (priority == null) return null;
-  if (priority <= 2) return "high";
-  if (priority === 3) return "medium";
-  return "low";
-}
-
-function difficultyLevel(load: number | null): Level | null {
-  if (load == null) return null;
-  if (load <= 2) return "low";
-  if (load <= 5) return "medium";
-  return "high";
-}
-
-const dotColor: Record<Level, string> = {
-  high: "bg-[#DD2020]",
-  medium: "bg-[#FF9500]",
-  low: "bg-[#029C05]",
+type GeneratedScheduleBlock = {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  schedulingReason: string | null;
+  task: { title: string } | null;
+  taskBreakdown: { title: string } | null;
 };
 
-const textColor: Record<Level, string> = {
-  high: "text-[#DD2020]",
-  medium: "text-[#FF9500]",
-  low: "text-[#029C05]",
+type UnscheduledTask = {
+  taskId: string;
+  title: string;
+  reason: string;
+  remainingMinutes: number;
 };
 
-const levelLabel: Record<Level, string> = { high: "High", medium: "Medium", low: "Low" };
+type RescheduleSuggestion = {
+  startTime: string;
+  endTime: string;
+  reason: string;
+} | null;
 
-function Indicator({ level, suffix }: { level: Level | null; suffix: string }) {
-  if (!level) return null;
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${textColor[level]}`}
-      style={{
-        fontFamily: '"Plus Jakarta Sans"',
-        fontSize: "12px",
-        fontStyle: "normal",
-        fontWeight: 300,
-        lineHeight: "normal",
-      }}
-    >
-      <span className={`h-2 w-2 rounded-full ${dotColor[level]}`} />
-      {levelLabel[level]} {suffix}
-    </span>
-  );
+type SyncedCalendarEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  startTime: string;
+  endTime: string;
+  status: string;
+};
+
+type GoogleCalendarStatus = {
+  state?: string;
+  imported?: string;
+  calendars?: string;
+  sync?: string;
+  message?: string;
+};
+
+type GoogleCalendarOption = {
+  id: string;
+  summary: string | null;
+  description: string | null;
+  primary: boolean;
+  backgroundColor: string | null;
+  selected: boolean;
+  accessRole: string | null;
+};
+
+function formatTime(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(date));
 }
 
-function formatTimeShort(date: string) {
-  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" })
-    .format(new Date(date))
-    .toLowerCase()
-    .replace(/\s/g, "");
+function formatDay(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(date));
 }
 
-function formatHourLabel(hour: number) {
-  const h12 = hour % 12 === 0 ? 12 : hour % 12;
-  return `${h12}:00`;
+function minutesBetween(startTime: string, endTime: string) {
+  return Math.round((new Date(endTime).getTime() - new Date(startTime).getTime()) / 60_000);
 }
 
-function formatGapHours(minutes: number) {
-  const hrs = minutes / 60;
-  const rounded = Math.round(hrs * 2) / 2;
-  return rounded.toString();
+function eventKindClass(kind: "event" | "block", status?: string) {
+  if (kind === "event") return "border-blue-200 bg-blue-50";
+  if (status === "accepted") return "border-emerald-200 bg-emerald-50";
+  if (status === "completed") return "border-zinc-200 bg-zinc-100";
+  if (status === "skipped") return "border-amber-200 bg-amber-50";
+  return "border-violet-200 bg-violet-50";
 }
 
-function EventCard({ item }: { item: CalendarItemViewModel }) {
-  const pLevel = priorityLevel(item.priority);
-  const dLevel = difficultyLevel(item.cognitiveLoad);
-  return (
-    <div className="rounded-2xl border border-white/5 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <p className="font-semibold text-[#F5F5F5]">{item.title}</p>
-        <div className="caption shrink-0 text-[10px] text-[#A0A0A0]">
-          {formatTimeShort(item.startTime)} - {formatTimeShort(item.endTime)}
-        </div>
-      </div>
-      {(pLevel || dLevel) && (
-        <div className="mt-3 flex flex-wrap items-center gap-5">
-          <Indicator level={pLevel} suffix="Priority" />
-          <Indicator level={dLevel} suffix="Difficulty" />
-        </div>
-      )}
-    </div>
-  );
+function generatedBlockToItem(block: GeneratedScheduleBlock): CalendarItemViewModel {
+  return {
+    id: block.id,
+    kind: "block",
+    title: block.title,
+    subtitle: block.task?.title ?? block.taskBreakdown?.title ?? "Scheduled work block",
+    startTime: block.startTime,
+    endTime: block.endTime,
+    status: block.status,
+    taskTitle: block.task?.title ?? null,
+    reason: block.schedulingReason,
+  };
+}
+
+function syncedEventToItem(event: SyncedCalendarEvent): CalendarItemViewModel {
+  return {
+    id: event.id,
+    kind: "event",
+    title: event.title,
+    subtitle: event.location || event.description || "Google Calendar event",
+    startTime: event.startTime,
+    endTime: event.endTime,
+    status: event.status,
+    taskTitle: null,
+    reason: null,
+  };
 }
 
 export function CalendarClient({
   initialItems,
-  selectedDate,
-  weekDays,
-  monthLabel,
-  selectedDayName,
+  googleCalendarStatus,
+  scheduleRange,
 }: {
   initialItems: CalendarItemViewModel[];
-  selectedDate: string;
-  weekDays: WeekDay[];
-  monthLabel: string;
-  selectedDayName: string;
+  googleCalendarStatus: GoogleCalendarStatus;
+  scheduleRange: { start: string; end: string };
 }) {
   const router = useRouter();
-  const [items] = useState(initialItems);
-  const [isCreating, setIsCreating] = useState(false);
-  const [form, setForm] = useState<TaskFormState>(defaultFormState);
-  const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState(initialItems);
+  const [busyEventId, setBusyEventId] = useState<string | null>(null);
+  const [busyBlockId, setBusyBlockId] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
+  const [isLoadingCalendars, setIsLoadingCalendars] = useState(false);
+  const [isSavingCalendars, setIsSavingCalendars] = useState(false);
+  const [showCalendarManager, setShowCalendarManager] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarOption[]>([]);
+  const [unscheduledTasks, setUnscheduledTasks] = useState<UnscheduledTask[]>([]);
+  const [rescheduleSuggestion, setRescheduleSuggestion] = useState<{
+    title: string;
+    suggestion: RescheduleSuggestion;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const sortedItems = useMemo(
-    () => [...items].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime)),
+  const groupedItems = useMemo(
+    () =>
+      items.reduce<Record<string, CalendarItemViewModel[]>>((groups, item) => {
+        const key = new Date(item.startTime).toISOString().slice(0, 10);
+        groups[key] ??= [];
+        groups[key].push(item);
+        return groups;
+      }, {}),
     [items],
   );
 
-  const { hours, gapsByHour } = useMemo(() => {
-    if (sortedItems.length === 0) {
-      return {
-        hours: [9, 10, 11, 12, 13, 14, 15, 16, 17],
-        gapsByHour: new Map<number, number>(),
-      };
-    }
-    const startH = Math.min(
-      ...sortedItems.map((it) => new Date(it.startTime).getHours()),
-    );
-    const endH = Math.max(
-      ...sortedItems.map((it) => new Date(it.endTime).getHours()),
-    );
-    const hourList: number[] = [];
-    for (let h = startH; h <= endH; h++) hourList.push(h);
-
-    const gMap = new Map<number, number>();
-    for (let i = 0; i < sortedItems.length - 1; i++) {
-      const a = sortedItems[i];
-      const b = sortedItems[i + 1];
-      const gapMin = (Date.parse(b.startTime) - Date.parse(a.endTime)) / 60_000;
-      if (gapMin >= 60) {
-        const midMs = (Date.parse(a.endTime) + Date.parse(b.startTime)) / 2;
-        gMap.set(new Date(midMs).getHours(), gapMin);
-      }
-    }
-    return { hours: hourList, gapsByHour: gMap };
-  }, [sortedItems]);
-
-  function openCreateForm() {
-    setError(null);
-    setForm(defaultFormState);
-    setIsCreating(true);
-  }
-
-  function closeForm() {
-    setIsCreating(false);
-    setForm(defaultFormState);
-  }
-
-  async function submitCreate() {
-    setError(null);
-    const payload = buildPayload(form);
-    if (!payload.title) {
-      setError("Title is required.");
+  async function deleteEvent(item: CalendarItemViewModel) {
+    if (!window.confirm(`Delete "${item.title}"? This marks it cancelled for the MVP.`)) {
       return;
     }
-    setBusy(true);
+
+    setError(null);
+    setBusyEventId(item.id);
     try {
-      const response = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(`/api/calendar/events/${item.id}`, { method: "DELETE" });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Failed to create task.");
-      closeForm();
+      if (!response.ok) throw new Error(body.error ?? "Failed to delete event.");
+      setItems((current) => current.filter((candidate) => candidate.id !== item.id || candidate.kind !== "event"));
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to create task.");
+      setError(caught instanceof Error ? caught.message : "Failed to delete event.");
     } finally {
-      setBusy(false);
+      setBusyEventId(null);
+    }
+  }
+
+  async function generateSchedule() {
+    setError(null);
+    setUnscheduledTasks([]);
+    setIsGenerating(true);
+
+    try {
+      const response = await fetch("/api/schedule/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: scheduleRange.start,
+          end: scheduleRange.end,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to generate schedule.");
+
+      const newBlocks = (body.data?.scheduledBlocks ?? []) as GeneratedScheduleBlock[];
+      const nextBlockItems = newBlocks.map(generatedBlockToItem);
+      setItems((current) => {
+        const existingKeys = new Set(current.map((item) => `${item.kind}-${item.id}`));
+        const merged = [
+          ...current,
+          ...nextBlockItems.filter((item) => !existingKeys.has(`${item.kind}-${item.id}`)),
+        ];
+
+        return merged.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+      });
+      setUnscheduledTasks((body.data?.unscheduledTasks ?? []) as UnscheduledTask[]);
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to generate schedule.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function syncGoogleCalendar() {
+    setError(null);
+    setIsSyncingGoogle(true);
+
+    try {
+      const response = await fetch("/api/calendar/google/sync", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to sync Google Calendar.");
+
+      const syncedEvents = ((body.data?.events ?? []) as SyncedCalendarEvent[])
+        .filter((event) => event.status !== "cancelled")
+        .map(syncedEventToItem);
+      setItems((current) => {
+        const withoutSyncedEvents = current.filter(
+          (item) => !syncedEvents.some((event) => event.kind === item.kind && event.id === item.id),
+        );
+
+        return [...withoutSyncedEvents, ...syncedEvents].sort(
+          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+        );
+      });
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to sync Google Calendar.");
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  }
+
+  async function loadGoogleCalendars() {
+    setError(null);
+    setIsLoadingCalendars(true);
+    setShowCalendarManager(true);
+
+    try {
+      const response = await fetch("/api/calendar/google/calendars");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to load Google calendars.");
+      setGoogleCalendars((body.data?.calendars ?? []) as GoogleCalendarOption[]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to load Google calendars.");
+    } finally {
+      setIsLoadingCalendars(false);
+    }
+  }
+
+  function toggleGoogleCalendar(calendarId: string) {
+    setGoogleCalendars((current) =>
+      current.map((calendar) =>
+        calendar.id === calendarId ? { ...calendar, selected: !calendar.selected } : calendar,
+      ),
+    );
+  }
+
+  async function saveGoogleCalendarSelection() {
+    setError(null);
+    setIsSavingCalendars(true);
+
+    try {
+      const selectedIds = googleCalendars.filter((calendar) => calendar.selected).map((calendar) => calendar.id);
+      const response = await fetch("/api/calendar/google/calendars", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calendarIds: selectedIds }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to save selected calendars.");
+      setGoogleCalendars((body.data?.calendars ?? []) as GoogleCalendarOption[]);
+      await syncGoogleCalendar();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to save selected calendars.");
+    } finally {
+      setIsSavingCalendars(false);
+    }
+  }
+
+  async function completeBlock(item: CalendarItemViewModel) {
+    setError(null);
+    setRescheduleSuggestion(null);
+    setBusyBlockId(item.id);
+
+    try {
+      const response = await fetch(`/api/scheduled-blocks/${item.id}/complete`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to complete scheduled block.");
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.kind === "block" && candidate.id === item.id
+            ? { ...candidate, status: body.data.scheduledBlock.status }
+            : candidate,
+        ),
+      );
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to complete scheduled block.");
+    } finally {
+      setBusyBlockId(null);
+    }
+  }
+
+  async function skipBlock(item: CalendarItemViewModel) {
+    setError(null);
+    setRescheduleSuggestion(null);
+    setBusyBlockId(item.id);
+
+    try {
+      const response = await fetch(`/api/scheduled-blocks/${item.id}/skip`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to skip scheduled block.");
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.kind === "block" && candidate.id === item.id
+            ? { ...candidate, status: body.data.scheduledBlock.status }
+            : candidate,
+        ),
+      );
+      setRescheduleSuggestion({
+        title: item.title,
+        suggestion: body.data.suggestion ?? null,
+      });
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to skip scheduled block.");
+    } finally {
+      setBusyBlockId(null);
     }
   }
 
   return (
-    <main className="min-h-screen bg-[#101010] px-5 py-8 pb-28 font-sans text-[#F5F5F5]">
-      <div className="flex w-full flex-col gap-6">
-        <header className="flex items-start justify-between">
-          <div>
-            <h1
-              className="font-normal italic"
-              style={{
-                fontFamily: '"Cormorant Garamond"',
-                fontSize: "48px",
-                lineHeight: "normal",
-              }}
-            >
-              {selectedDayName}
-            </h1>
-            <p className="mt-1 text-sm text-[#A0A0A0]">{monthLabel} ›</p>
-          </div>
+    <section className="grid gap-5">
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-zinc-950">Planning agent</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Generate proposed work blocks around fixed calendar events for this demo week.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="/api/calendar/google/connect"
+            className="rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700"
+          >
+            Link Google Calendar
+          </a>
           <button
             type="button"
-            onClick={openCreateForm}
-            aria-label="Create"
-            className="inline-flex items-center justify-center rounded-full p-2.5 text-[#D9D9D9] backdrop-blur-md transition-colors duration-300 ease-out hover:text-white"
-            style={{
-              backgroundColor: "rgba(110, 110, 110, 0.20)",
-              boxShadow:
-                "inset 0 0 0 1px rgba(0, 0, 0, 0.6), inset 1px 1px 0px 0px rgba(185, 185, 185), inset -1px -1px 0px 0px rgb(185, 185, 185)",
-            }}
+            onClick={loadGoogleCalendars}
+            disabled={isLoadingCalendars}
+            className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-400"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
+            {isLoadingCalendars ? "Loading..." : "Manage calendars"}
           </button>
-        </header>
-
-        <nav className="grid grid-cols-7 gap-1 text-center">
-          {weekDays.map(({ letter, date, day }) => {
-            const isActive = date === selectedDate;
-            return (
-              <Link
-                key={date}
-                href={`?day=${date}`}
-                className="flex flex-col items-center gap-1.5 py-1"
-              >
-                <span className="text-[11px] uppercase tracking-wide text-[#A0A0A0]">
-                  {letter}
-                </span>
-                <span
-                  className={`flex h-9 w-9 items-center justify-center rounded-md text-base ${
-                    isActive ? "bg-[#1f2520] text-[#F5F5F5]" : "text-[#A0A0A0]"
-                  }`}
-                  style={
-                    isActive
-                      ? {
-                          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
-                        }
-                      : undefined
-                  }
-                >
-                  {day}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {error && (
-          <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
-            {error}
-          </div>
-        )}
-
-        <section className="flex flex-col gap-5">
-          {hours.map((h) => {
-            const eventsAtHour = sortedItems.filter(
-              (it) => new Date(it.startTime).getHours() === h,
-            );
-            const gapMinutes = gapsByHour.get(h);
-            return (
-              <div key={h} className="grid grid-cols-[60px_1fr] gap-3">
-                <div className="pt-3 text-sm text-[#A0A0A0]">{formatHourLabel(h)}</div>
-                <div className="flex flex-col gap-4">
-                  {eventsAtHour.map((it) => (
-                    <EventCard key={`${it.kind}-${it.id}`} item={it} />
-                  ))}
-                  {gapMinutes !== undefined && (
-                    <p className="py-3 text-center text-sm text-[#A0A0A0]">
-                      You have a {formatGapHours(gapMinutes)} hr gap, take a breather!
-                    </p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </section>
+          <button
+            type="button"
+            onClick={syncGoogleCalendar}
+            disabled={isSyncingGoogle}
+            className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-400"
+          >
+            {isSyncingGoogle ? "Syncing..." : "Sync selected"}
+          </button>
+          <button
+            type="button"
+            onClick={generateSchedule}
+            disabled={isGenerating}
+            className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+          >
+            {isGenerating ? "Generating..." : "Generate Schedule"}
+          </button>
+        </div>
       </div>
 
-      <AnimatePresence>
-        {isCreating && (
-          <CreateSheet
-            form={form}
-            setForm={setForm}
-            onSubmit={submitCreate}
-            onCancel={closeForm}
-            busy={busy}
-          />
-        )}
-      </AnimatePresence>
-    </main>
+      {googleCalendarStatus.state === "connected" && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+          Google Calendar connected
+          {googleCalendarStatus.imported ? ` and imported ${googleCalendarStatus.imported} events.` : "."}
+          {googleCalendarStatus.calendars ? ` Found ${googleCalendarStatus.calendars} calendars.` : null}
+          {googleCalendarStatus.sync === "error" && googleCalendarStatus.message
+            ? ` Sync needs attention: ${googleCalendarStatus.message}`
+            : null}
+        </div>
+      )}
+
+      {showCalendarManager && (
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-zinc-950">Google calendars</h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                Select the calendars that should block time in this planner.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={saveGoogleCalendarSelection}
+              disabled={isSavingCalendars || googleCalendars.length === 0}
+              className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+            >
+              {isSavingCalendars ? "Saving..." : "Save & sync"}
+            </button>
+          </div>
+          <div className="mt-4 grid gap-2">
+            {googleCalendars.length === 0 && (
+              <p className="text-sm text-zinc-500">
+                {isLoadingCalendars ? "Loading calendars..." : "No Google calendars loaded yet."}
+              </p>
+            )}
+            {googleCalendars.map((calendar) => (
+              <label
+                key={calendar.id}
+                className="flex items-start gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={calendar.selected}
+                  onChange={() => toggleGoogleCalendar(calendar.id)}
+                  className="mt-1"
+                />
+                <span
+                  className="mt-1 h-3 w-3 shrink-0 rounded-full border border-white shadow-sm"
+                  style={{ backgroundColor: calendar.backgroundColor ?? "#2563eb" }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0">
+                  <span className="block font-medium text-zinc-950">
+                    {calendar.summary ?? calendar.id}
+                    {calendar.primary ? " (primary)" : ""}
+                  </span>
+                  <span className="block truncate text-xs text-zinc-500">{calendar.id}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {googleCalendarStatus.state === "error" && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          Google Calendar connection failed
+          {googleCalendarStatus.message ? `: ${googleCalendarStatus.message}` : "."}
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {error}
+        </div>
+      )}
+
+      {unscheduledTasks.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <h2 className="font-semibold">Could not fit everything</h2>
+          <ul className="mt-2 grid gap-2">
+            {unscheduledTasks.map((task) => (
+              <li key={task.taskId}>
+                <span className="font-medium">{task.title}</span>: {task.reason} ({task.remainingMinutes} min left)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {rescheduleSuggestion && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <h2 className="font-semibold">Reschedule suggestion</h2>
+          {rescheduleSuggestion.suggestion ? (
+            <p className="mt-1">
+              {rescheduleSuggestion.title}: {formatTime(rescheduleSuggestion.suggestion.startTime)} -{" "}
+              {formatTime(rescheduleSuggestion.suggestion.endTime)}. {rescheduleSuggestion.suggestion.reason}
+            </p>
+          ) : (
+            <p className="mt-1">No same-day opening was found for {rescheduleSuggestion.title}.</p>
+          )}
+        </div>
+      )}
+
+      {Object.entries(groupedItems).map(([date, dayItems]) => (
+        <section key={date} className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            {formatDay(dayItems[0].startTime)}
+          </h2>
+          <div className="mt-3 grid gap-3">
+            {dayItems.map((item) => (
+              <article
+                key={`${item.kind}-${item.id}`}
+                className={`rounded-lg border p-3 ${eventKindClass(item.kind, item.status)}`}
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-zinc-950">{item.title}</h3>
+                      <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                        {item.kind === "event" ? "busy" : item.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-zinc-600">{item.subtitle}</p>
+                  </div>
+                  <div className="shrink-0 text-left text-sm font-medium text-zinc-800 sm:text-right">
+                    {formatTime(item.startTime)} - {formatTime(item.endTime)}
+                    <div className="text-xs font-normal text-zinc-500">
+                      {minutesBetween(item.startTime, item.endTime)} min
+                    </div>
+                  </div>
+                </div>
+                {item.reason && (
+                  <p className="mt-3 rounded-md bg-white/60 px-3 py-2 text-xs text-zinc-600">
+                    {item.reason}
+                  </p>
+                )}
+                {item.kind === "event" && (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => deleteEvent(item)}
+                      disabled={busyEventId === item.id}
+                      className="rounded-md border border-red-200 bg-white/80 px-3 py-2 text-sm font-semibold text-red-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                    >
+                      {busyEventId === item.id ? "Deleting..." : "Delete event"}
+                    </button>
+                  </div>
+                )}
+                {item.kind === "block" && (
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => completeBlock(item)}
+                      disabled={busyBlockId === item.id || item.status === "completed" || item.status === "skipped"}
+                      className="rounded-md border border-emerald-200 bg-white/80 px-3 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                    >
+                      {busyBlockId === item.id ? "Saving..." : "Complete"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => skipBlock(item)}
+                      disabled={busyBlockId === item.id || item.status === "completed" || item.status === "skipped"}
+                      className="rounded-md border border-amber-200 bg-white/80 px-3 py-2 text-sm font-semibold text-amber-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                    >
+                      {busyBlockId === item.id ? "Saving..." : "Skip"}
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+    </section>
   );
 }

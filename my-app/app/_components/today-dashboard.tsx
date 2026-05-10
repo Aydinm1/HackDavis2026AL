@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getCurrentUserId } from "@/lib/auth";
 import { getTodayDashboard, parseDashboardDate } from "@/lib/services/dashboard";
 import { DailyCheckinForm, type DailyCheckinFormState } from "@/app/_components/daily-checkin-form";
@@ -43,6 +42,12 @@ function minutesBetween(startTime: Date, endTime: Date) {
   return Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
 }
 
+function insightClass(severity: string) {
+  if (severity === "urgent") return "border-red-200 bg-red-50";
+  if (severity === "caution") return "border-amber-200 bg-amber-50";
+  return "border-blue-200 bg-blue-50";
+}
+
 function formatLoggedAt(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -57,8 +62,8 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
 
   if (!validation.ok) {
     return (
-      <main className="min-h-screen bg-[#101010] px-5 py-8 pb-28 font-sans text-zinc-950">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-red-700">
+      <main className="min-h-screen bg-zinc-50 px-5 py-8 pb-28 font-sans text-zinc-950">
+        <div className="mx-auto max-w-5xl rounded-lg border border-red-200 bg-red-50 p-5 text-red-700">
           {validation.error}
         </div>
       </main>
@@ -71,49 +76,7 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
     0,
   );
   const highLoadBlocks = dashboard.todayBlocks.filter((block) => (block.task?.cognitiveLoad ?? 0) >= 6);
-
-  // Pick 3 blocks: priority is the primary factor, then try to cover low/medium/high difficulty.
-  const byPriority = [...dashboard.todayBlocks].sort((a, b) => {
-    const ap = a.task?.priority ?? Number.POSITIVE_INFINITY;
-    const bp = b.task?.priority ?? Number.POSITIVE_INFINITY;
-    if (ap !== bp) return ap - bp;
-    return a.startTime.getTime() - b.startTime.getTime();
-  });
-  const difficultyBucket = (block: (typeof byPriority)[number]) => {
-    const load = block.task?.cognitiveLoad ?? block.taskBreakdown?.cognitiveLoad ?? null;
-    if (load == null) return null;
-    if (load <= 2) return "low" as const;
-    if (load <= 5) return "medium" as const;
-    return "high" as const;
-  };
-  const picked: typeof byPriority = [];
-  const pickedIds = new Set<string>();
-  for (const level of ["high", "medium", "low"] as const) {
-    const candidate = byPriority.find(
-      (b) => !pickedIds.has(b.id) && difficultyBucket(b) === level,
-    );
-    if (candidate) {
-      picked.push(candidate);
-      pickedIds.add(candidate.id);
-    }
-  }
-  for (const block of byPriority) {
-    if (picked.length >= 3) break;
-    if (!pickedIds.has(block.id)) {
-      picked.push(block);
-      pickedIds.add(block.id);
-    }
-  }
-  const urgentBlocks = picked.sort((a, b) => {
-    const ap = a.task?.priority ?? Number.POSITIVE_INFINITY;
-    const bp = b.task?.priority ?? Number.POSITIVE_INFINITY;
-    if (ap !== bp) return ap - bp;
-    return a.startTime.getTime() - b.startTime.getTime();
-  });
-  const hasMoreBlocks = dashboard.todayBlocks.length > 3;
-  const remainingCount = dashboard.todayBlocks.length - 3;
-
-  const todayBlocks: TodayBlockViewModel[] = urgentBlocks.map((block) => ({
+  const todayBlocks: TodayBlockViewModel[] = dashboard.todayBlocks.map((block) => ({
     id: block.id,
     title: block.title,
     subtitle: block.task?.title ?? block.taskBreakdown?.title ?? "Scheduled work",
@@ -121,11 +84,7 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
     endTime: block.endTime.toISOString(),
     status: block.status,
     schedulingReason: block.schedulingReason,
-    priority: block.task?.priority ?? null,
-    cognitiveLoad: block.task?.cognitiveLoad ?? block.taskBreakdown?.cognitiveLoad ?? null,
-    dueAt: block.task?.dueAt ? block.task.dueAt.toISOString() : null,
   }));
-
   const checkinFormState: DailyCheckinFormState | null = dashboard.checkin
     ? {
         planningCycleId: dashboard.checkin.planningCycleId,
@@ -137,97 +96,144 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
     : null;
 
   return (
-    <main className="min-h-screen bg-[#101010] px-5 py-8 pb-28 font-sans text-zinc-950">
-      <div className="flex w-full flex-col gap-6">
-        <header className="relative">
-          <div className="absolute top-3 right-0 inline-flex px-[12px] py-[11px] gap-[18px] rounded-full bg-[rgba(110,110,110,0.20)] border border-white/10">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path d="M21.6488 19.875C20.2209 17.4065 18.0206 15.6365 15.4528 14.7975C16.723 14.0414 17.7098 12.8892 18.2618 11.5179C18.8137 10.1467 18.9003 8.63211 18.5082 7.20688C18.1161 5.78165 17.267 4.52454 16.0912 3.6286C14.9155 2.73266 13.4782 2.24744 12 2.24744C10.5218 2.24744 9.08451 2.73266 7.90878 3.6286C6.73306 4.52454 5.88394 5.78165 5.49183 7.20688C5.09971 8.63211 5.18629 10.1467 5.73825 11.5179C6.29021 12.8892 7.27704 14.0414 8.5472 14.7975C5.97938 15.6356 3.77907 17.4056 2.35126 19.875C2.2989 19.9604 2.26417 20.0554 2.24912 20.1544C2.23407 20.2534 2.239 20.3544 2.26363 20.4515C2.28825 20.5486 2.33207 20.6397 2.3925 20.7196C2.45293 20.7995 2.52874 20.8664 2.61547 20.9165C2.7022 20.9666 2.79808 20.9988 2.89745 21.0113C2.99683 21.0237 3.0977 21.0161 3.19409 20.989C3.29049 20.9618 3.38047 20.9156 3.45872 20.8531C3.53697 20.7906 3.6019 20.713 3.6497 20.625C5.41595 17.5725 8.53782 15.75 12 15.75C15.4622 15.75 18.5841 17.5725 20.3503 20.625C20.3981 20.713 20.4631 20.7906 20.5413 20.8531C20.6196 20.9156 20.7095 20.9618 20.8059 20.989C20.9023 21.0161 21.0032 21.0237 21.1026 21.0113C21.2019 20.9988 21.2978 20.9666 21.3845 20.9165C21.4713 20.8664 21.5471 20.7995 21.6075 20.7196C21.6679 20.6397 21.7118 20.5486 21.7364 20.4515C21.761 20.3544 21.766 20.2534 21.7509 20.1544C21.7358 20.0554 21.7011 19.9604 21.6488 19.875ZM6.75001 8.99999C6.75001 7.96164 7.05792 6.9466 7.63479 6.08324C8.21167 5.21989 9.03161 4.54698 9.99092 4.14962C10.9502 3.75226 12.0058 3.64829 13.0242 3.85086C14.0426 4.05344 14.9781 4.55345 15.7123 5.28768C16.4465 6.0219 16.9466 6.95736 17.1491 7.97576C17.3517 8.99416 17.2477 10.0498 16.8504 11.0091C16.453 11.9684 15.7801 12.7883 14.9168 13.3652C14.0534 13.9421 13.0384 14.25 12 14.25C10.6081 14.2485 9.27359 13.6949 8.28934 12.7107C7.3051 11.7264 6.7515 10.3919 6.75001 8.99999Z" fill="#F5F5F5"/>
-            </svg>
-          </div>
-          <div className="pt-[80px]">
-            <svg xmlns="http://www.w3.org/2000/svg" width="58" height="53" viewBox="0 0 58 53" fill="none">
-              <path d="M57.8358 31.3031C57.8358 43.6519 31.9701 53 14.7734 53C-2.42338 53 -2.26798 30.6837 3.51095 17.225C7.9616 6.85974 9.50158 0 26.6983 0C43.8951 0 57.8358 18.9544 57.8358 31.3031Z" fill="#D9D9D9"/>
-            </svg>
-            <h1 className="font-normal py-[20px]">your day at a glance</h1>
+    <main className="min-h-screen bg-zinc-50 px-5 py-8 pb-28 font-sans text-zinc-950">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <header className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">Today dashboard</p>
+          <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-normal text-zinc-950">{formatHeaderDate(dashboard.date)}</h1>
+              <p className="mt-1 text-sm text-zinc-500">
+                Check-in, next event, scheduled blocks, top tasks, and AI guidance from Prisma.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <div className="text-lg font-semibold">{dashboard.todayBlocks.length}</div>
+                <div className="text-xs text-zinc-500">blocks</div>
+              </div>
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <div className="text-lg font-semibold">{Math.round(totalBlockMinutes / 60)}h</div>
+                <div className="text-xs text-zinc-500">planned</div>
+              </div>
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <div className="text-lg font-semibold">{highLoadBlocks.length}</div>
+                <div className="text-xs text-zinc-500">hard</div>
+              </div>
+            </div>
           </div>
         </header>
 
-        {/* Today's blocks — capped at 3 */}
-        <article className="rounded-lg shadow-sm">
-          <h2 className="text-base font-semibold text-zinc-950">— upcoming events & tasks</h2>
-          <TodayBlocksClient initialBlocks={todayBlocks} />
-          <Link
-            href="/calendar"
-            className="mt-3 flex-col flex w-full items-center justify-center gap-2 rounded-lg  px-4 py-3 text-sm font-medium text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-200"
-          >
-          <svg xmlns="http://www.w3.org/2000/svg" width="8" height="17" viewBox="0 0 8 17" fill="none">
-            <path d="M3.32845 16.3536C3.52372 16.5488 3.8403 16.5488 4.03556 16.3536L7.21754 13.1716C7.4128 12.9763 7.4128 12.6597 7.21754 12.4645C7.02228 12.2692 6.7057 12.2692 6.51043 12.4645L3.68201 15.2929L0.85358 12.4645C0.658318 12.2692 0.341735 12.2692 0.146473 12.4645C-0.0487893 12.6597 -0.0487893 12.9763 0.146473 13.1716L3.32845 16.3536ZM3.68201 0H3.18201V16H3.68201H4.18201V0H3.68201Z" fill="#F5F5F5"/>
-          </svg>
-          <span className="caption font-thin">
-            {hasMoreBlocks ? `view more events & tasks` : "See full calendar"}
-          </span>
-          </Link>
-        </article>
-
-        {/* AI insights */}
-        <article className="flex flex-col gap-3">
-          {/* First insight — full width rectangle */}
-          {dashboard.insights[0] && (
-            <div className="rounded-2xl bg-[#1a1f1a] p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-semibold text-[#F5F5F5]">{dashboard.insights[0].title}</h3>
-                <span className="text-xs text-zinc-500">{dashboard.insights[0].scope}</span>
+        <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+          <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-zinc-950">Daily check-in</h2>
+            {dashboard.checkin ? (
+              <div className="mt-4 grid gap-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md bg-zinc-50 px-3 py-2">
+                    <div className="text-xs text-zinc-500">Energy</div>
+                    <div className="text-lg font-semibold">{dashboard.checkin.energyScore}/7</div>
+                  </div>
+                  <div className="rounded-md bg-zinc-50 px-3 py-2">
+                    <div className="text-xs text-zinc-500">Stress</div>
+                    <div className="text-lg font-semibold">{dashboard.checkin.stressScore}/7</div>
+                  </div>
+                </div>
+                {dashboard.checkin.availableCapacityMinutes && (
+                  <div className="rounded-md bg-zinc-50 px-3 py-2 text-sm">
+                    <span className="font-medium">{dashboard.checkin.availableCapacityMinutes} min</span> available capacity
+                  </div>
+                )}
+                {dashboard.checkin.userNote && <p className="text-sm text-zinc-600">{dashboard.checkin.userNote}</p>}
               </div>
-              <p className="mt-2 text-sm text-[#A0A0A0]">{dashboard.insights[0].body}</p>
-            </div>
-          )}
+            ) : (
+              <p className="mt-3 text-sm text-zinc-500">No check-in has been submitted for this date.</p>
+            )}
+            <DailyCheckinForm date={dashboard.date} initialCheckin={checkinFormState} />
+            {dashboard.todayCheckinLogs.length > 0 && (
+              <div className="mt-4 border-t border-zinc-100 pt-4">
+                <h3 className="text-sm font-semibold text-zinc-950">Today&apos;s stress/energy log</h3>
+                <div className="mt-2 grid gap-2">
+                  {dashboard.todayCheckinLogs.map((log) => (
+                    <div key={log.id} className="rounded-md bg-zinc-50 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-zinc-700">{formatLoggedAt(log.loggedAt)}</span>
+                        <span className="text-xs text-zinc-500">
+                          Energy {log.energyScore}/7 · Stress {log.stressScore}/7
+                        </span>
+                      </div>
+                      {log.userNote && <p className="mt-1 text-xs text-zinc-500">{log.userNote}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </article>
 
-          {/* Yesterday stats — 2 column grid */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-[#1a1f1a] p-5 ">
-              <p
-                className="mt-2"
-                style={{
-                  color: "#F5F5F5",
-                  fontFamily: '"Cormorant Garamond"',
-                  fontSize: "64px",
-                  fontStyle: "italic",
-                  fontWeight: 400,
-                  lineHeight: "normal",
-                }}
-              >
-                {dashboard.yesterdayEventsAttended}
-              </p>
-              <p className="mt-1 text-xs text-[#A0A0A0] pt-2">Events attended yesterday</p>
-            </div>
-            <div className="rounded-2xl bg-[#1a1f1a] p-5">
-              <p
-                className="mt-2"
-                style={{
-                  color: "#F5F5F5",
-                  fontFamily: '"Cormorant Garamond"',
-                  fontSize: "64px",
-                  fontStyle: "italic",
-                  fontWeight: 400,
-                  lineHeight: "normal",
-                }}
-              >
-                {dashboard.yesterdayTasksCompleted}
-              </p>
-              <p className="mt-1 text-xs text-[#A0A0A0] pt-2">Tasks completed yesterday</p>
-            </div>
-          </div>
-        </article>
+          <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-zinc-950">Next calendar event</h2>
+            {dashboard.nextCalendarEvent ? (
+              <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <h3 className="font-semibold text-zinc-950">{dashboard.nextCalendarEvent.title}</h3>
+                <p className="mt-1 text-sm text-zinc-600">
+                  {formatTime(dashboard.nextCalendarEvent.startTime)} - {formatTime(dashboard.nextCalendarEvent.endTime)}
+                </p>
+                {dashboard.nextCalendarEvent.location && (
+                  <p className="mt-1 text-sm text-zinc-600">{dashboard.nextCalendarEvent.location}</p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-zinc-500">No upcoming fixed events for this date.</p>
+            )}
+          </article>
+        </section>
 
-        <footer className="relative">
-          <div className="pt-[80px] flex flex-col items-center text-center">
-            <svg xmlns="http://www.w3.org/2000/svg" width="58" height="53" viewBox="0 0 58 53" fill="none">
-              <path d="M57.8358 31.3031C57.8358 43.6519 31.9701 53 14.7734 53C-2.42338 53 -2.26798 30.6837 3.51095 17.225C7.9616 6.85974 9.50158 0 26.6983 0C43.8951 0 57.8358 18.9544 57.8358 31.3031Z" fill="#D9D9D9"/>
-            </svg>
-            <p className="font-normal py-[20px]">hug your mom!</p>
+        <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-zinc-950">Today&apos;s blocks</h2>
+            </div>
+            <AdjustTodayClient />
+            <TodayBlocksClient initialBlocks={todayBlocks} />
+          </article>
+
+          <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-zinc-950">Top tasks</h2>
+            <div className="mt-3 grid gap-2">
+              {dashboard.topTasks.map((task) => (
+                <div key={task.id} className="rounded-md bg-zinc-50 px-3 py-2 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium text-zinc-950">{task.title}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{formatDate(task.dueAt)}</div>
+                    </div>
+                    <div className="shrink-0 text-right text-xs text-zinc-500">
+                      <div>P{task.priority}</div>
+                      <div>Load {task.cognitiveLoad}/7</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+        </section>
+
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <h2 className="text-base font-semibold text-zinc-950">AI insights</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {dashboard.insights.map((insight) => (
+              <article key={insight.id} className={`rounded-lg border p-3 ${insightClass(insight.severity)}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-zinc-950">{insight.title}</h3>
+                  <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                    {insight.scope}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-zinc-700">{insight.body}</p>
+              </article>
+            ))}
           </div>
-        </footer>
+        </section>
       </div>
     </main>
   );

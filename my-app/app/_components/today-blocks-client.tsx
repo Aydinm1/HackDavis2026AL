@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
 export type TodayBlockViewModel = {
   id: string;
   title: string;
@@ -6,129 +11,132 @@ export type TodayBlockViewModel = {
   endTime: string;
   status: string;
   schedulingReason: string | null;
-  priority: number | null;
-  cognitiveLoad: number | null;
-  dueAt: string | null;
 };
+
+type RescheduleSuggestion = {
+  startTime: string;
+  endTime: string;
+  reason: string;
+} | null;
 
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
-  })
-    .format(new Date(date))
-    .toLowerCase()
-    .replace(/\s/g, "");
+  }).format(new Date(date));
 }
 
-function ordinalSuffix(day: number) {
-  if (day >= 11 && day <= 13) return "th";
-  switch (day % 10) {
-    case 1:
-      return "st";
-    case 2:
-      return "nd";
-    case 3:
-      return "rd";
-    default:
-      return "th";
-  }
+function minutesBetween(startTime: string, endTime: string) {
+  return Math.round((new Date(endTime).getTime() - new Date(startTime).getTime()) / 60_000);
 }
 
-function formatDueDate(date: string) {
-  const d = new Date(date);
-  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(d);
-  const month = new Intl.DateTimeFormat("en-US", { month: "long" }).format(d);
-  const day = d.getDate();
-  return `${weekday}, ${month} ${day}${ordinalSuffix(day)}, ${d.getFullYear()}`;
-}
-
-type Level = "high" | "medium" | "low";
-
-// priority: 1-5 (1 = highest)
-function priorityLevel(priority: number | null): Level | null {
-  if (priority == null) return null;
-  if (priority <= 2) return "high";
-  if (priority === 3) return "medium";
-  return "low";
-}
-
-// cognitiveLoad: 1-7 (1 = easiest)
-function difficultyLevel(load: number | null): Level | null {
-  if (load == null) return null;
-  if (load <= 2) return "low";
-  if (load <= 5) return "medium";
-  return "high";
-}
-
-const dotColor: Record<Level, string> = {
-  high: "bg-[#DD2020]",
-  medium: "bg-[#FF9500]",
-  low: "bg-[#029C05]",
-};
-
-const textColor: Record<Level, string> = {
-  high: "text-[#DD2020]",
-  medium: "text-[#FF9500]",
-  low: "text-[#029C05]",
-};
-
-const levelLabel: Record<Level, string> = {
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
-function Indicator({ level, suffix }: { level: Level | null; suffix: string }) {
-  if (!level) return null;
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${textColor[level]}`}
-      style={{
-        fontFamily: '"Plus Jakarta Sans"',
-        fontSize: "12px",
-        fontStyle: "normal",
-        fontWeight: 300,
-        lineHeight: "normal",
-      }}
-    >
-      <span className={`h-2 w-2 rounded-full ${dotColor[level]}`} />
-      {levelLabel[level]} {suffix}
-    </span>
-  );
+function statusClass(status: string) {
+  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "accepted") return "border-blue-200 bg-blue-50 text-blue-700";
+  if (status === "skipped") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-violet-200 bg-violet-50 text-violet-700";
 }
 
 export function TodayBlocksClient({ initialBlocks }: { initialBlocks: TodayBlockViewModel[] }) {
+  const router = useRouter();
+  const [blocks, setBlocks] = useState(initialBlocks);
+  const [busyBlockId, setBusyBlockId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rescheduleSuggestion, setRescheduleSuggestion] = useState<{
+    title: string;
+    suggestion: RescheduleSuggestion;
+  } | null>(null);
+
+  async function updateBlock(block: TodayBlockViewModel, operation: "complete" | "skip") {
+    setError(null);
+    setRescheduleSuggestion(null);
+    setBusyBlockId(block.id);
+
+    try {
+      const response = await fetch(`/api/scheduled-blocks/${block.id}/${operation}`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? `Failed to ${operation} scheduled block.`);
+      setBlocks((current) =>
+        current.map((candidate) =>
+          candidate.id === block.id ? { ...candidate, status: body.data.scheduledBlock.status } : candidate,
+        ),
+      );
+      if (operation === "skip") {
+        setRescheduleSuggestion({
+          title: block.title,
+          suggestion: body.data.suggestion ?? null,
+        });
+      }
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `Failed to ${operation} scheduled block.`);
+    } finally {
+      setBusyBlockId(null);
+    }
+  }
+
   return (
     <div className="mt-3 grid gap-3">
-      {initialBlocks.length > 0 ? (
-        initialBlocks.map((block) => {
-          const pLevel = priorityLevel(block.priority);
-          const dLevel = difficultyLevel(block.cognitiveLoad);
-          return (
-            <div key={block.id} className="rounded-2xl border border-white/5 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-[#F5F5F5]">{block.title}</p>
-                  {block.dueAt && (
-                    <p className="caption mt-1 text-[14px] text-[#A0A0A0]">{formatDueDate(block.dueAt)}</p>
-                  )}
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+          {error}
+        </div>
+      )}
+      {rescheduleSuggestion && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {rescheduleSuggestion.suggestion ? (
+            <>
+              Suggested next slot for {rescheduleSuggestion.title}: {formatTime(rescheduleSuggestion.suggestion.startTime)} -{" "}
+              {formatTime(rescheduleSuggestion.suggestion.endTime)}.
+            </>
+          ) : (
+            <>No same-day reschedule slot was found for {rescheduleSuggestion.title}.</>
+          )}
+        </div>
+      )}
+      {blocks.length > 0 ? (
+        blocks.map((block) => (
+          <div key={block.id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-zinc-950">{block.title}</h3>
+                  <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClass(block.status)}`}>
+                    {block.status}
+                  </span>
                 </div>
-                <div className="caption shrink-0 text-[10px] text-[#A0A0A0]">
-                  {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                </div>
+                <p className="mt-1 text-sm text-zinc-600">{block.subtitle}</p>
               </div>
-              {(pLevel || dLevel) && (
-                <div className="mt-3 flex flex-wrap items-center gap-5">
-                  <Indicator level={pLevel} suffix="Priority" />
-                  <Indicator level={dLevel} suffix="Difficulty" />
-                </div>
-              )}
+              <div className="shrink-0 text-sm font-medium text-zinc-800 sm:text-right">
+                {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                <div className="text-xs font-normal text-zinc-500">{minutesBetween(block.startTime, block.endTime)} min</div>
+              </div>
             </div>
-          );
-        })
+            {block.schedulingReason && (
+              <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs text-zinc-600">{block.schedulingReason}</p>
+            )}
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => updateBlock(block, "complete")}
+                disabled={busyBlockId === block.id || block.status === "completed" || block.status === "skipped"}
+                className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+              >
+                {busyBlockId === block.id ? "Saving..." : "Complete"}
+              </button>
+              <button
+                type="button"
+                onClick={() => updateBlock(block, "skip")}
+                disabled={busyBlockId === block.id || block.status === "completed" || block.status === "skipped"}
+                className="rounded-md border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+              >
+                {busyBlockId === block.id ? "Saving..." : "Skip"}
+              </button>
+            </div>
+          </div>
+        ))
       ) : (
-        <p className="text-sm text-[#A0A0A0]">No scheduled work blocks for this date.</p>
+        <p className="text-sm text-zinc-500">No scheduled work blocks for this date.</p>
       )}
     </div>
   );
