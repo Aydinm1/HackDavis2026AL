@@ -333,10 +333,50 @@ const EXAMPLE_PROMPTS = [
   "What's the weather like?",
 ];
 
+type DbAiAction = {
+  id: string;
+  actionType: string;
+  status: string;
+  requiresConfirmation: boolean;
+  inputPayload: unknown;
+  resultPayload: unknown;
+  errorMessage: string | null;
+};
+
+type DbMessage = {
+  id: string;
+  role: string;
+  content: string;
+  aiActions: DbAiAction[];
+};
+
+function dbMessageToChatEntry(msg: DbMessage): ChatEntry | null {
+  if (msg.role !== "user" && msg.role !== "assistant") return null;
+  const actions: AiAction[] = msg.aiActions.map((a) => ({
+    id: a.id,
+    actionType: a.actionType as AiAction["actionType"],
+    status: a.status as ActionStatus,
+    requiresConfirmation: a.requiresConfirmation,
+    inputPayload: (typeof a.inputPayload === "object" && a.inputPayload !== null && !Array.isArray(a.inputPayload)
+      ? a.inputPayload
+      : {}) as Record<string, unknown>,
+    resultPayload: (typeof a.resultPayload === "object" && a.resultPayload !== null && !Array.isArray(a.resultPayload)
+      ? a.resultPayload
+      : null) as Record<string, unknown> | null,
+    errorMessage: a.errorMessage,
+  }));
+  return {
+    role: msg.role as "user" | "assistant",
+    content: msg.content,
+    actions: actions.length > 0 ? actions : undefined,
+  };
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [isRecording, setIsRecording] = useState(false);
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
@@ -349,6 +389,36 @@ export default function ChatPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Load most recent thread on mount
+  useEffect(() => {
+    async function loadHistory() {
+      try {
+        const threadsRes = await fetch("/api/chat/threads");
+        const threadsJson = await threadsRes.json() as { data?: { id: string }[] };
+        const threads = threadsJson.data ?? [];
+        if (threads.length === 0) return;
+
+        const mostRecent = threads[0];
+        const msgsRes = await fetch(`/api/chat/threads/${mostRecent.id}/messages`);
+        const msgsJson = await msgsRes.json() as { data?: DbMessage[] };
+        const dbMessages = msgsJson.data ?? [];
+
+        const entries = dbMessages.flatMap((m) => {
+          const entry = dbMessageToChatEntry(m);
+          return entry ? [entry] : [];
+        });
+
+        setThreadId(mostRecent.id);
+        setMessages(entries);
+      } catch {
+        // silently ignore — user just starts a fresh thread
+      } finally {
+        setLoadingHistory(false);
+      }
+    }
+    void loadHistory();
+  }, []);
 
   type UploadResponseData = {
     transcript?: string;
@@ -608,7 +678,7 @@ export default function ChatPage() {
         </div>
         {threadId && (
           <button
-            onClick={() => { setThreadId(undefined); setMessages([]); }}
+            onClick={() => { setThreadId(undefined); setMessages([]); setLoadingHistory(false); }}
             className="ml-auto text-xs text-zinc-400 hover:text-zinc-700 px-3 py-1 rounded-md border border-zinc-200 hover:border-zinc-300 transition-colors"
           >
             New thread
@@ -620,21 +690,27 @@ export default function ChatPage() {
       <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-            <div>
-              <p className="text-zinc-400 text-sm mb-1">Try describing a task or event in plain English.</p>
-              <p className="text-zinc-300 text-xs">Parsed AI actions will appear below each response.</p>
-            </div>
-            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-              {EXAMPLE_PROMPTS.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => void send(p)}
-                  className="text-xs bg-white border border-zinc-200 hover:border-violet-300 hover:text-violet-700 text-zinc-600 px-3 py-1.5 rounded-full transition-colors"
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            {loadingHistory ? (
+              <p className="text-zinc-300 text-sm">Loading conversation…</p>
+            ) : (
+              <>
+                <div>
+                  <p className="text-zinc-400 text-sm mb-1">Try describing a task or event in plain English.</p>
+                  <p className="text-zinc-300 text-xs">Parsed AI actions will appear below each response.</p>
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+                  {EXAMPLE_PROMPTS.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => void send(p)}
+                      className="text-xs bg-white border border-zinc-200 hover:border-violet-300 hover:text-violet-700 text-zinc-600 px-3 py-1.5 rounded-full transition-colors"
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
