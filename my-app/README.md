@@ -1,4 +1,4 @@
-# Highfi
+# Flow State
 
 ## Watch the Demo First
 
@@ -7,7 +7,7 @@ The demo video is intentionally linked at the top because it shows the core flow
 
 ## What It Is
 
-Highfi is a hackathon MVP for an AI planning app that turns messy student planning inputs into structured tasks, calendar events, schedule blocks, check-ins, and insights.
+Flow State is a hackathon MVP for an AI planning app that turns messy student planning inputs into structured tasks, calendar events, schedule blocks, check-ins, and insights.
 
 The product is not a generic chatbot. Chat, image, and voice are input methods for creating validated actions. The database remains the source of truth, and risky or destructive changes require confirmation before they modify core records.
 
@@ -118,7 +118,3 @@ tests/
 - Daily check-ins track energy and stress from 1 to 7.
 - AI actions are validated before modifying database-backed records.
 - Confirmations are required for risky actions such as scheduling, event changes, and destructive updates.
-
-## Notes
-
-The app is optimized for an MVP/demo environment. Authentication is mocked through the local helper, and Google Calendar OAuth is supported at the service layer without being required for the core demo.
