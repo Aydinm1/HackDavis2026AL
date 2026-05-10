@@ -186,6 +186,242 @@ function actionTheme(actionType: AiAction["actionType"]) {
   return { rgb: "61, 149, 169", border: "border-[#3D95A9]/20" };
 }
 
+function actionDisplayTitle(action: AiAction) {
+  const p = action.inputPayload;
+  if (typeof p.title === "string" && p.title.trim()) return p.title.trim();
+
+  switch (action.actionType) {
+    case "DAILY_CHECKIN":
+      return "Today's check-in";
+    case "ADJUST_TODAY":
+      return "Daily plan adjustment";
+    case "GENERATE_SCHEDULE":
+      return p.dryRun === false ? "Save generated schedule" : "Preview schedule proposal";
+    case "CREATE_EVENT":
+      return "Calendar event";
+    case "UPDATE_EVENT":
+      return "Calendar update";
+    case "UPDATE_TASK":
+      return "Task update";
+    case "CREATE_TASK":
+      return "New task";
+  }
+}
+
+function ScheduleProposalDetails({ payload }: { payload: Record<string, unknown> }) {
+  const rawText = typeof payload.rawText === "string" && payload.rawText.trim() ? payload.rawText.trim() : null;
+  const trigger = typeof payload.trigger === "string" ? payload.trigger : null;
+  const dryRun = payload.dryRun !== false;
+  const scheduleImpact =
+    typeof payload.scheduleImpact === "object" && payload.scheduleImpact !== null && !Array.isArray(payload.scheduleImpact)
+      ? payload.scheduleImpact as Record<string, unknown>
+      : null;
+  const impactTitle =
+    typeof scheduleImpact?.title === "string" && scheduleImpact.title.trim() ? scheduleImpact.title.trim() : null;
+  const impactReason =
+    typeof scheduleImpact?.reason === "string" && scheduleImpact.reason.trim() ? scheduleImpact.reason.trim() : null;
+  const priority = typeof scheduleImpact?.priority === "number" ? scheduleImpact.priority : null;
+  const cognitiveLoad = typeof scheduleImpact?.cognitiveLoad === "number" ? scheduleImpact.cognitiveLoad : null;
+  const estimatedMinutes = typeof scheduleImpact?.estimatedMinutes === "number" ? scheduleImpact.estimatedMinutes : null;
+  const dueAt = typeof scheduleImpact?.dueAt === "string" ? formatDateTime(scheduleImpact.dueAt) : null;
+
+  return (
+    <div className="relative z-10 mt-4 flex flex-col gap-3">
+      <p className="caption text-[13px] leading-relaxed text-[#A0A0A0]">
+        {dryRun
+          ? "This will generate a preview only. Nothing is added to your calendar until you approve the generated blocks."
+          : "This will save the generated blocks into your schedule."}
+      </p>
+
+      <div className="flex flex-wrap gap-2">
+        <span className="rounded-full border border-[#36B539]/35 bg-[#36B539]/10 px-3 py-1 text-xs text-[#C8F5CA]">
+          {dryRun ? "Preview first" : "Will save blocks"}
+        </span>
+        {trigger && (
+          <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-[#D9D9D9]">
+            {trigger === "task_added" ? "After new task" : "From chat request"}
+          </span>
+        )}
+      </div>
+
+      {(impactTitle || rawText) && (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+          <p className="caption text-[12px] uppercase tracking-wide text-white/35">Planning around</p>
+          <p className="caption mt-1 text-[13px] leading-relaxed text-[#D9D9D9]">{impactTitle ?? rawText}</p>
+          {impactReason && <p className="caption mt-2 text-[12px] leading-relaxed text-[#A0A0A0]">{impactReason}</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {priority !== null && (
+              <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-white/70">
+                Priority {priority}/5
+              </span>
+            )}
+            {cognitiveLoad !== null && (
+              <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-white/70">
+                Difficulty {cognitiveLoad}/7
+              </span>
+            )}
+            {estimatedMinutes !== null && (
+              <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-white/70">
+                {estimatedMinutes} min
+              </span>
+            )}
+            {dueAt && (
+              <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-white/70">
+                Due {dueAt}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getRecordArray(value: unknown) {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function ScheduleResultDetails({
+  resultPayload,
+  onConfirm,
+  isPending,
+}: {
+  resultPayload: Record<string, unknown> | null | undefined;
+  onConfirm: (actionId: string) => void;
+  isPending: boolean;
+}) {
+  if (!resultPayload) return null;
+
+  const blocks = getRecordArray(resultPayload.scheduledBlocks);
+  const unscheduledTasks = getRecordArray(resultPayload.unscheduledTasks);
+  const saveScheduleAction = isRecord(resultPayload.saveScheduleAction) ? resultPayload.saveScheduleAction : null;
+  const saveActionId = typeof saveScheduleAction?.id === "string" ? saveScheduleAction.id : null;
+  const saveActionStatus = typeof saveScheduleAction?.status === "string" ? saveScheduleAction.status : null;
+  const dryRun = resultPayload.dryRun !== false;
+  const hasBlocks = blocks.length > 0;
+
+  return (
+    <div className="relative z-10 mt-4 flex flex-col gap-3">
+      <div className="rounded-xl border border-[#36B539]/25 bg-[#36B539]/8 p-3">
+        <p className="text-sm font-medium text-[#F5F5F5]">
+          {dryRun ? "Generated preview" : "Schedule saved"}
+        </p>
+        <p className="caption mt-1 text-[12px] leading-relaxed text-[#A0A0A0]">
+          {hasBlocks
+            ? `${blocks.length} block${blocks.length === 1 ? "" : "s"} proposed for your schedule.`
+            : "No blocks were added to the preview. The scheduler could not find enough open time for the available task set."}
+          {unscheduledTasks.length > 0
+            ? ` ${unscheduledTasks.length} task${unscheduledTasks.length === 1 ? "" : "s"} could not fit.`
+            : ""}
+        </p>
+      </div>
+
+      {hasBlocks && (
+        <div className="space-y-2">
+          {blocks.slice(0, 5).map((block, index) => {
+            const title = typeof block.title === "string" ? block.title : `Block ${index + 1}`;
+            const start = typeof block.startTime === "string" ? formatDateTime(block.startTime) : "";
+            const startShort = typeof block.startTime === "string" ? formatTimeShort(block.startTime) : null;
+            const endShort = typeof block.endTime === "string" ? formatTimeShort(block.endTime) : null;
+
+            return (
+              <div key={`${title}-${index}`} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-[#F5F5F5]">{title}</p>
+                    {start && <p className="caption mt-1 text-[12px] text-[#A0A0A0]">{start}</p>}
+                  </div>
+                  {(startShort || endShort) && (
+                    <span className="caption shrink-0 text-[10px] text-[#A0A0A0]">
+                      {startShort}
+                      {startShort && endShort ? " - " : null}
+                      {endShort}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {blocks.length > 5 && (
+            <p className="caption text-[12px] text-[#A0A0A0]">+ {blocks.length - 5} more blocks</p>
+          )}
+        </div>
+      )}
+
+      {!hasBlocks && (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+          <p className="text-xs uppercase tracking-wide text-white/35">What this means</p>
+          <p className="caption mt-1 text-[12px] leading-relaxed text-[#A0A0A0]">
+            Nothing has changed yet. Add more availability, reduce task duration, or move a fixed event, then generate again.
+          </p>
+        </div>
+      )}
+
+      {unscheduledTasks.length > 0 && (
+        <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3">
+          <p className="text-xs uppercase tracking-wide text-amber-200/70">Could not fit</p>
+          <p className="caption mt-1 text-[12px] text-[#D9D9D9]">
+            {unscheduledTasks
+              .slice(0, 3)
+              .map((task) => (typeof task.title === "string" ? task.title : "Untitled task"))
+              .join(", ")}
+          </p>
+        </div>
+      )}
+
+      {hasBlocks && saveActionId && saveActionStatus === "proposed" && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+          <p className="caption text-[12px] leading-relaxed text-[#A0A0A0]">
+            Approve this preview to add these blocks to your schedule.
+          </p>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => onConfirm(saveActionId)}
+            className="shrink-0 rounded-full border border-white/30 px-3 py-1 text-xs text-[#F5F5F5] disabled:opacity-50"
+          >
+            {isPending ? "..." : "Save schedule"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CheckinDetails({ payload }: { payload: Record<string, unknown> }) {
+  const energy = typeof payload.energyScore === "number" ? payload.energyScore : null;
+  const stress = typeof payload.stressScore === "number" ? payload.stressScore : null;
+  const capacity = typeof payload.availableCapacityMinutes === "number" ? payload.availableCapacityMinutes : null;
+  const note = typeof payload.userNote === "string" && payload.userNote.trim() ? payload.userNote.trim() : null;
+
+  return (
+    <div className="relative z-10 mt-4 flex flex-col gap-3">
+      <div className="flex flex-wrap gap-2">
+        {energy !== null && (
+          <span className="rounded-full border border-[#3D95A9]/35 bg-[#3D95A9]/10 px-3 py-1 text-xs text-[#BFEFF5]">
+            Energy {energy}/7
+          </span>
+        )}
+        {stress !== null && (
+          <span className="rounded-full border border-[#B726C1]/35 bg-[#B726C1]/10 px-3 py-1 text-xs text-[#F0C5F4]">
+            Stress {stress}/7
+          </span>
+        )}
+        {capacity !== null && (
+          <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-[#D9D9D9]">
+            {capacity} min available
+          </span>
+        )}
+      </div>
+      {note && <p className="caption text-[13px] leading-relaxed text-[#A0A0A0]">{note}</p>}
+    </div>
+  );
+}
+
 function ActionCard({
   action,
   onConfirm,
@@ -198,7 +434,7 @@ function ActionCard({
   isPending: boolean;
 }) {
   const p = action.inputPayload;
-  const title = typeof p.title === "string" ? p.title : "(untitled)";
+  const title = actionDisplayTitle(action);
   const startRaw =
     typeof p.startTime === "string" ? p.startTime : typeof p.dueAt === "string" ? p.dueAt : null;
   const endRaw = typeof p.endTime === "string" ? p.endTime : null;
@@ -242,6 +478,15 @@ function ActionCard({
           <Indicator level={dLevel} suffix="Difficulty" />
         </div>
       )}
+      {action.actionType === "DAILY_CHECKIN" && <CheckinDetails payload={p} />}
+      {action.actionType === "GENERATE_SCHEDULE" && <ScheduleProposalDetails payload={p} />}
+      {action.actionType === "GENERATE_SCHEDULE" && action.status === "executed" && (
+        <ScheduleResultDetails
+          resultPayload={action.resultPayload}
+          onConfirm={onConfirm}
+          isPending={isPending}
+        />
+      )}
       {action.errorMessage && (
         <p className="relative z-10 mt-3 text-xs text-red-400">{action.errorMessage}</p>
       )}
@@ -270,7 +515,13 @@ function ActionCard({
         </div>
       )}
       {action.status === "executed" && (
-        <p className="relative z-10 mt-2 text-[10px] uppercase tracking-wide text-emerald-500">Saved</p>
+        <p className="relative z-10 mt-4 text-[10px] uppercase tracking-wide text-emerald-500">
+          {action.actionType === "DAILY_CHECKIN"
+            ? "Check-in saved"
+            : action.actionType === "GENERATE_SCHEDULE" && action.resultPayload?.dryRun !== false
+              ? "Preview ready"
+              : "Saved"}
+        </p>
       )}
     </div>
   );
@@ -401,7 +652,7 @@ function Message({
       )}
       {entry.content && (
         <div
-          className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+          className={`max-w-[80%] select-text rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
             isUser
               ? "rounded-br-sm bg-zinc-700/60 text-[#F5F5F5]"
               : "rounded-bl-sm bg-transparent text-[#F5F5F5]"
@@ -487,6 +738,8 @@ export default function ChatPage() {
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const [historyDraft, setHistoryDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -506,6 +759,16 @@ export default function ChatPage() {
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
   }, [input]);
+
+  function focusTextareaEnd() {
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      const end = textarea.value.length;
+      textarea.setSelectionRange(end, end);
+    });
+  }
 
   useEffect(() => {
     async function loadHistory() {
@@ -561,14 +824,32 @@ export default function ChatPage() {
   function replaceActionInMessages(action: AiAction) {
     setMessages((prev) =>
       prev.map((message) => {
-        if (!message.actions?.some((existingAction) => existingAction.id === action.id)) {
+        if (!message.actions?.some((existingAction) => {
+          const nestedSaveAction = isRecord(existingAction.resultPayload?.saveScheduleAction)
+            ? existingAction.resultPayload.saveScheduleAction
+            : null;
+          return existingAction.id === action.id || nestedSaveAction?.id === action.id;
+        })) {
           return message;
         }
         return {
           ...message,
-          actions: message.actions.map((existingAction) =>
-            existingAction.id === action.id ? action : existingAction,
-          ),
+          actions: message.actions.map((existingAction) => {
+            if (existingAction.id === action.id) return action;
+
+            const nestedSaveAction = isRecord(existingAction.resultPayload?.saveScheduleAction)
+              ? existingAction.resultPayload.saveScheduleAction
+              : null;
+            if (nestedSaveAction?.id !== action.id) return existingAction;
+
+            return {
+              ...existingAction,
+              resultPayload: {
+                ...(existingAction.resultPayload ?? {}),
+                saveScheduleAction: action,
+              },
+            };
+          }),
         };
       }),
     );
@@ -608,6 +889,31 @@ export default function ChatPage() {
         return next;
       });
     }
+  }
+
+  function findLatestPendingActionId(operation: "confirm" | "cancel") {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const actions = messages[i].actions ?? [];
+      for (let j = actions.length - 1; j >= 0; j--) {
+        const action = actions[j];
+        const nestedSaveAction = isRecord(action.resultPayload?.saveScheduleAction)
+          ? action.resultPayload.saveScheduleAction
+          : null;
+        if (
+          operation === "confirm" &&
+          nestedSaveAction?.status === "proposed" &&
+          typeof nestedSaveAction.id === "string"
+        ) {
+          return nestedSaveAction.id;
+        }
+
+        if (action.status === "proposed" && !action.inputPayload.ambiguous) {
+          return action.id;
+        }
+      }
+    }
+
+    return null;
   }
 
   async function startRecording() {
@@ -701,7 +1007,28 @@ export default function ChatPage() {
     const imagesToSend = [...pendingImages];
     if ((!trimmed && imagesToSend.length === 0) || loading) return;
 
+    const typedOperation = /^(confirm|approve|yes|save|looks good|do it)$/i.test(trimmed)
+      ? "confirm"
+      : /^(cancel|no|nevermind|never mind)$/i.test(trimmed)
+        ? "cancel"
+        : null;
+    const typedActionId = typedOperation && imagesToSend.length === 0
+      ? findLatestPendingActionId(typedOperation)
+      : null;
+
+    if (typedOperation && typedActionId) {
+      setInput("");
+      setHistoryCursor(null);
+      setHistoryDraft("");
+      setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+      await updateAction(typedActionId, typedOperation);
+      textareaRef.current?.focus();
+      return;
+    }
+
     setInput("");
+    setHistoryCursor(null);
+    setHistoryDraft("");
     setPendingImages([]);
     setMessages((prev) => [
       ...prev,
@@ -771,10 +1098,69 @@ export default function ChatPage() {
     }
   }
 
+  function handleInputChange(value: string) {
+    setInput(value);
+    setHistoryCursor(null);
+    setHistoryDraft("");
+  }
+
+  function getUserPromptHistory() {
+    return messages
+      .filter((message) => message.role === "user" && message.content.trim().length > 0)
+      .map((message) => message.content);
+  }
+
+  function recallPromptHistory(direction: "older" | "newer") {
+    const history = getUserPromptHistory();
+    if (history.length === 0) return false;
+
+    if (direction === "older") {
+      const nextCursor = historyCursor === null ? history.length - 1 : Math.max(0, historyCursor - 1);
+      if (historyCursor === null) {
+        setHistoryDraft(input);
+      }
+      setHistoryCursor(nextCursor);
+      setInput(history[nextCursor]);
+      focusTextareaEnd();
+      return true;
+    }
+
+    if (historyCursor === null) return false;
+
+    const nextCursor = historyCursor + 1;
+    if (nextCursor >= history.length) {
+      setHistoryCursor(null);
+      setInput(historyDraft);
+      setHistoryDraft("");
+      focusTextareaEnd();
+      return true;
+    }
+
+    setHistoryCursor(nextCursor);
+    setInput(history[nextCursor]);
+    focusTextareaEnd();
+    return true;
+  }
+
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send(input);
+      return;
+    }
+
+    if (e.key === "ArrowUp" && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
+      const atStart = e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0;
+      if ((input.length === 0 || atStart || historyCursor !== null) && recallPromptHistory("older")) {
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (e.key === "ArrowDown" && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey && historyCursor !== null) {
+      if (recallPromptHistory("newer")) {
+        e.preventDefault();
+      }
     }
   }
 
@@ -801,7 +1187,7 @@ export default function ChatPage() {
           </p>
         </div>
       ) : (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+        <div className="mx-auto flex w-full max-w-2xl select-text flex-col gap-4">
           {loadingHistory && (
             <p className="py-6 text-center text-sm text-[#A0A0A0]">Loading conversation…</p>
           )}
@@ -887,7 +1273,7 @@ export default function ChatPage() {
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKey}
               placeholder="How are you feeling today?"
               rows={1}
@@ -904,8 +1290,8 @@ export default function ChatPage() {
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F5F5F5] text-[#101010] transition-opacity disabled:opacity-50"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 12h14" />
-                  <path d="M13 5l7 7-7 7" />
+                  <path d="M12 19V5" />
+                  <path d="M5 12l7-7 7 7" />
                 </svg>
               </button>
             ) : (

@@ -20,6 +20,7 @@ export type WeekDay = {
 
 export type CalendarItemViewModel = {
   id: string;
+  taskId?: string | null;
   kind: "event" | "block";
   title: string;
   startTime: string;
@@ -32,6 +33,11 @@ type EventFormState = {
   title: string;
   startTime: string;
   endTime: string;
+};
+
+type BlockTaskFormState = EventFormState & {
+  priority: string;
+  cognitiveLoad: string;
 };
 
 type Level = "high" | "medium" | "low";
@@ -272,6 +278,133 @@ function EventSheet({
   );
 }
 
+function BlockTaskSheet({
+  form,
+  setForm,
+  onSave,
+  onDelete,
+  onClose,
+  busy,
+  error,
+}: {
+  form: BlockTaskFormState;
+  setForm: (f: BlockTaskFormState) => void;
+  onSave: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-end justify-center"
+    >
+      <div className="absolute inset-0 cursor-default bg-black/60" onClick={onClose} />
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        drag="y"
+        dragConstraints={{ top: 0 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 120 || info.velocity.y > 600) onClose();
+        }}
+        className="relative z-10 w-full max-w-md rounded-t-3xl bg-[#182022] px-5 pt-3 pb-20 shadow-2xl"
+      >
+        <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-white/30" />
+
+        <h2 className="mb-5 text-base font-semibold text-[#F5F5F5]">Edit Task Block</h2>
+
+        {error && (
+          <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#A0A0A0]">Title</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="rounded-xl bg-[#222A2C] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#A0A0A0]">Priority</label>
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={form.priority}
+                onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                className="rounded-xl bg-[#222A2C] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#A0A0A0]">Difficulty</label>
+              <input
+                type="number"
+                min="1"
+                max="7"
+                value={form.cognitiveLoad}
+                onChange={(e) => setForm({ ...form, cognitiveLoad: e.target.value })}
+                className="rounded-xl bg-[#222A2C] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#A0A0A0]">Start</label>
+            <input
+              type="datetime-local"
+              value={form.startTime}
+              onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+              className="rounded-xl bg-[#222A2C] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#A0A0A0]">End</label>
+            <input
+              type="datetime-local"
+              value={form.endTime}
+              onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+              className="rounded-xl bg-[#222A2C] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-3">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={busy}
+            className="flex-1 rounded-xl bg-[#263A40] py-3 text-sm font-medium text-[#F5F5F5] disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={busy}
+            className="flex-1 rounded-xl bg-red-900/40 py-3 text-sm font-medium text-red-300 disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export function CalendarClient({
   initialItems,
   selectedDate,
@@ -303,6 +436,18 @@ export function CalendarClient({
   const [eventForm, setEventForm] = useState<EventFormState>({ title: "", startTime: "", endTime: "" });
   const [eventBusy, setEventBusy] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
+
+  // Scheduled task block edit sheet state
+  const [editingBlock, setEditingBlock] = useState<CalendarItemViewModel | null>(null);
+  const [blockForm, setBlockForm] = useState<BlockTaskFormState>({
+    title: "",
+    startTime: "",
+    endTime: "",
+    priority: "",
+    cognitiveLoad: "",
+  });
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockError, setBlockError] = useState<string | null>(null);
 
   const sortedItems = useMemo(
     () => [...initialItems].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime)),
@@ -388,6 +533,22 @@ export function CalendarClient({
     setEditingEvent(null);
   }
 
+  function openBlockEdit(item: CalendarItemViewModel) {
+    setBlockError(null);
+    setBlockForm({
+      title: item.title,
+      startTime: toDatetimeLocal(item.startTime),
+      endTime: toDatetimeLocal(item.endTime),
+      priority: item.priority == null ? "" : String(item.priority),
+      cognitiveLoad: item.cognitiveLoad == null ? "" : String(item.cognitiveLoad),
+    });
+    setEditingBlock(item);
+  }
+
+  function closeBlockEdit() {
+    setEditingBlock(null);
+  }
+
   async function submitEventEdit() {
     if (!editingEvent) return;
     setEventError(null);
@@ -427,6 +588,78 @@ export function CalendarClient({
       setEventError(e instanceof Error ? e.message : "Failed to delete event.");
     } finally {
       setEventBusy(false);
+    }
+  }
+
+  async function submitBlockEdit() {
+    if (!editingBlock) return;
+    setBlockError(null);
+
+    const title = blockForm.title.trim();
+    if (!title) {
+      setBlockError("Title is required.");
+      return;
+    }
+
+    setBlockBusy(true);
+    try {
+      const blockRes = await fetch(`/api/scheduled-blocks/${editingBlock.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          startTime: blockForm.startTime ? new Date(blockForm.startTime).toISOString() : undefined,
+          endTime: blockForm.endTime ? new Date(blockForm.endTime).toISOString() : undefined,
+        }),
+      });
+      const blockBody = await blockRes.json();
+      if (!blockRes.ok) throw new Error(blockBody.error ?? "Failed to update scheduled block.");
+
+      if (editingBlock.taskId) {
+        const taskPayload: Record<string, unknown> = { title };
+        if (blockForm.priority) taskPayload.priority = Number(blockForm.priority);
+        if (blockForm.cognitiveLoad) taskPayload.cognitiveLoad = Number(blockForm.cognitiveLoad);
+
+        const taskRes = await fetch(`/api/tasks/${editingBlock.taskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(taskPayload),
+        });
+        const taskBody = await taskRes.json();
+        if (!taskRes.ok) throw new Error(taskBody.error ?? "Failed to update task.");
+      }
+
+      closeBlockEdit();
+      router.refresh();
+    } catch (e) {
+      setBlockError(e instanceof Error ? e.message : "Failed to update task block.");
+    } finally {
+      setBlockBusy(false);
+    }
+  }
+
+  async function deleteBlockTask() {
+    if (!editingBlock) return;
+    if (!window.confirm(`Delete "${editingBlock.title}"?`)) return;
+    setBlockBusy(true);
+    setBlockError(null);
+    try {
+      const skipRes = await fetch(`/api/scheduled-blocks/${editingBlock.id}/skip`, { method: "POST" });
+      const skipBody = await skipRes.json();
+      if (!skipRes.ok) throw new Error(skipBody.error ?? "Failed to remove scheduled block.");
+
+      if (editingBlock.taskId) {
+        const taskRes = await fetch(`/api/tasks/${editingBlock.taskId}`, { method: "DELETE" });
+        const taskBody = await taskRes.json();
+        if (!taskRes.ok) throw new Error(taskBody.error ?? "Failed to delete task.");
+      }
+
+      closeBlockEdit();
+      router.refresh();
+    } catch (e) {
+      setBlockError(e instanceof Error ? e.message : "Failed to delete task block.");
+    } finally {
+      setBlockBusy(false);
     }
   }
 
@@ -538,7 +771,7 @@ export function CalendarClient({
                     <EventCard
                       key={`${it.kind}-${it.id}`}
                       item={it}
-                      onEdit={it.kind === "event" ? () => openEventEdit(it) : undefined}
+                      onEdit={it.kind === "event" ? () => openEventEdit(it) : () => openBlockEdit(it)}
                     />
                   ))}
                   {gapMinutes !== undefined && (
@@ -575,6 +808,20 @@ export function CalendarClient({
             onClose={closeEventEdit}
             busy={eventBusy}
             error={eventError}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editingBlock && (
+          <BlockTaskSheet
+            form={blockForm}
+            setForm={setBlockForm}
+            onSave={submitBlockEdit}
+            onDelete={deleteBlockTask}
+            onClose={closeBlockEdit}
+            busy={blockBusy}
+            error={blockError}
           />
         )}
       </AnimatePresence>

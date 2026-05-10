@@ -174,6 +174,66 @@ async function callGeminiTranscribe(modelName: string, parts: Part[]): Promise<s
   return (response.text ?? "").trim();
 }
 
+async function callGeminiPlainText(modelName: string, systemInstruction: string, parts: Part[]): Promise<string> {
+  const response = await getGeminiClient().models.generateContent({
+    model: modelName,
+    contents: [{ role: "user", parts }],
+    config: {
+      systemInstruction,
+      thinkingConfig: getThinkingConfig(modelName),
+    },
+  });
+  return (response.text ?? "").trim();
+}
+
+export async function answerChatQuery(
+  question: string,
+  context: Record<string, unknown>,
+): Promise<string | null> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const systemInstruction = `You are a friendly planning assistant answering a user's read-only question about their schedule, tasks, calendar, or recent check-ins.
+Today's date is ${today}.
+
+You will be given:
+1. The user's question.
+2. A JSON snapshot of their current data (events, scheduled work blocks, tasks, today's check-in, recent insights).
+
+Rules:
+- Answer using ONLY the data in the JSON snapshot. Do not invent items.
+- Be concise and conversational. 1-3 short sentences when possible.
+- Format times in a friendly local style (e.g. "10:00 AM", "2-3 PM").
+- If the snapshot has no relevant data for the question, say so plainly (e.g. "Nothing on your calendar today.").
+- Do not output JSON. Do not output an action. Just answer in plain text.
+- Do not start with phrases like "Based on your data" — just answer directly.`;
+
+  const userPrompt = `Question: ${question}\n\nUser data (JSON):\n${JSON.stringify(context).slice(0, 8000)}`;
+
+  const models = getGeminiModels();
+
+  for (const model of models) {
+    try {
+      const text = await callGeminiPlainText(model, systemInstruction, [{ text: userPrompt }]);
+      if (text) {
+        console.log(`[geminiParser] Answered chat query via ${model}`);
+        return text;
+      }
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      const message = error instanceof Error ? error.message : String(error);
+      if (status === 429 || status === 503) {
+        console.warn(`[geminiParser] ${model} quota/overload (${status}) on Q&A, trying next model…`);
+        continue;
+      }
+      console.error(`[geminiParser] Gemini Q&A error on ${model} (status=${status}): ${message}`);
+      continue;
+    }
+  }
+
+  console.warn("[geminiParser] All Gemini models failed on Q&A");
+  return null;
+}
+
 export async function parseGeminiChatMessage(
   content: string,
   options: { correctionExamples?: unknown[] } = {},

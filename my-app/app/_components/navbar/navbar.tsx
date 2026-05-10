@@ -1,8 +1,9 @@
 ﻿"use client";
 
 import type { ElementType } from 'react';
+import { useEffect } from 'react';
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChatIcon, DailyIcon, CalendarIcon, StatisticsIcon, ToDoIcon } from "../icons/icons";
 
@@ -31,7 +32,27 @@ const directionalBorderShadow = `
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const isChatActive = pathname === chatItem.href;
+
+  useEffect(() => {
+    const routes = [...navItems.map((item) => item.href), chatItem.href];
+    const prefetchRoutes = () => {
+      for (const route of routes) {
+        if (route !== pathname) {
+          router.prefetch(route);
+        }
+      }
+    };
+
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(prefetchRoutes, { timeout: 1500 });
+      return () => window.cancelIdleCallback(id);
+    }
+
+    const id = globalThis.setTimeout(prefetchRoutes, 250);
+    return () => globalThis.clearTimeout(id);
+  }, [pathname, router]);
 
   return (
     <>
@@ -88,9 +109,14 @@ interface NavItemProps {
 }
 
 function NavItem({ href, Icon, isActive, sharedLayoutId, suppressBubble = false }: NavItemProps) {
+  const router = useRouter();
+
   return (
     <Link 
       href={href} 
+      prefetch={true}
+      onMouseEnter={() => router.prefetch(href)}
+      onTouchStart={() => router.prefetch(href)}
       className={`${baseItemClasses} ${isActive ? "px-4" : "text-[#D9D9D9]/50 hover:text-[#D9D9D9]"}`}
     >
       <AnimatePresence>

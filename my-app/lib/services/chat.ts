@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { parseGeminiChatMessage } from "@/lib/ai/geminiParser";
+import { answerChatQuery, parseGeminiChatMessage } from "@/lib/ai/geminiParser";
 import { parseWithBackboard } from "@/lib/ai/backboardClient";
 import {
   inferDailyEnergyScore,
@@ -77,6 +77,10 @@ function jsonObject(value: unknown): Prisma.InputJsonObject {
 
 function getSaveScheduleActionPayload(result: unknown) {
   if (!isRecord(result) || !isRecord(result.saveScheduleAction) || !isRecord(result.saveScheduleAction.inputPayload)) {
+    return null;
+  }
+
+  if (!Array.isArray(result.scheduledBlocks) || result.scheduledBlocks.length === 0) {
     return null;
   }
 
@@ -318,15 +322,6 @@ function endOfLocalDate(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0, 0, 0, 0);
 }
 
-function formatReadableDate(date: Date) {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-}
-
 export function resolveNextWeekdayDate(text: string, baseDate = new Date()) {
   const weekdayMatch = text.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
   if (!weekdayMatch) {
@@ -342,127 +337,6 @@ export function resolveNextWeekdayDate(text: string, baseDate = new Date()) {
     weekday,
     date: addDays(start, daysUntil),
   };
-}
-
-function hasWeekdayMention(text: string) {
-  return /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i.test(text);
-}
-
-function isTaskPriorityQuery(text: string) {
-  const asksQuestion = /\b(what|which|show|tell|list|find)\b/i.test(text);
-  const asksAboutWork = /\b(task|tasks|to do|todo|have to do|need to do|work on|do)\b/i.test(text);
-  const asksPriority = /\b(priority|highest|top|important|most important|what matters)\b/i.test(text);
-
-  return asksQuestion && asksAboutWork && asksPriority && hasWeekdayMention(text);
-}
-
-async function answerTaskPriorityQuery(userId: string, content: string) {
-  if (!isTaskPriorityQuery(content)) {
-    return null;
-  }
-
-  const resolved = resolveNextWeekdayDate(content);
-  if (!resolved) {
-    return "Which day should I check? You can say something like \"Monday\" or \"Friday\".";
-  }
-
-  const start = startOfLocalDate(resolved.date);
-  const end = endOfLocalDate(resolved.date);
-
-  const [dueTasks, scheduledBlocks] = await Promise.all([
-    prisma.task.findMany({
-      where: {
-        userId,
-        status: { notIn: ["completed", "cancelled"] },
-        dueAt: { gte: start, lt: end },
-      },
-      orderBy: [{ priority: "asc" }, { cognitiveLoad: "desc" }, { dueAt: "asc" }, { createdAt: "asc" }],
-    }),
-    prisma.scheduledBlock.findMany({
-      where: {
-        userId,
-        status: { notIn: ["completed", "cancelled", "skipped"] },
-        startTime: { gte: start, lt: end },
-        task: {
-          status: { notIn: ["completed", "cancelled"] },
-        },
-      },
-      include: { task: true },
-      orderBy: { startTime: "asc" },
-    }),
-  ]);
-
-  const candidates = new Map<
-    string,
-    {
-      id: string;
-      title: string;
-      priority: number;
-      cognitiveLoad: number;
-      dueAt: Date | null;
-      estimatedMinutes: number | null;
-      scheduledStart: Date | null;
-      source: "due" | "scheduled" | "due and scheduled";
-    }
-  >();
-
-  for (const task of dueTasks) {
-    candidates.set(task.id, {
-      id: task.id,
-      title: task.title,
-      priority: task.priority,
-      cognitiveLoad: task.cognitiveLoad,
-      dueAt: task.dueAt,
-      estimatedMinutes: task.estimatedMinutes,
-      scheduledStart: null,
-      source: "due",
-    });
-  }
-
-  for (const block of scheduledBlocks) {
-    if (!block.task) continue;
-
-    const existing = candidates.get(block.task.id);
-    candidates.set(block.task.id, {
-      id: block.task.id,
-      title: block.task.title,
-      priority: block.task.priority,
-      cognitiveLoad: block.task.cognitiveLoad,
-      dueAt: block.task.dueAt,
-      estimatedMinutes: block.task.estimatedMinutes,
-      scheduledStart: existing?.scheduledStart ?? block.startTime,
-      source: existing ? "due and scheduled" : "scheduled",
-    });
-  }
-
-  const sortedTasks = [...candidates.values()].sort((a, b) => {
-    if (a.priority !== b.priority) return a.priority - b.priority;
-    const aDue = a.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
-    const bDue = b.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
-    if (aDue !== bDue) return aDue - bDue;
-    if (a.cognitiveLoad !== b.cognitiveLoad) return b.cognitiveLoad - a.cognitiveLoad;
-    return (a.scheduledStart?.getTime() ?? 0) - (b.scheduledStart?.getTime() ?? 0);
-  });
-
-  const dateLabel = formatReadableDate(start);
-  if (sortedTasks.length === 0) {
-    return `Next ${resolved.weekday} is ${dateLabel}. I do not see any incomplete tasks due or scheduled for that day.`;
-  }
-
-  const topTask = sortedTasks[0];
-  const supportingDetails = [
-    `priority ${topTask.priority}/5`,
-    `difficulty ${topTask.cognitiveLoad}/7`,
-    topTask.estimatedMinutes ? `${topTask.estimatedMinutes} min estimate` : null,
-    topTask.source === "due" ? "due that day" : topTask.source === "scheduled" ? "scheduled that day" : "due and scheduled that day",
-  ].filter(Boolean);
-
-  const otherTasks = sortedTasks
-    .slice(1, 4)
-    .map((task) => `${task.title} (priority ${task.priority}/5)`);
-  const otherText = otherTasks.length > 0 ? ` Other Monday tasks: ${otherTasks.join(", ")}.` : "";
-
-  return `Next ${resolved.weekday} is ${dateLabel}. Your highest priority task is "${topTask.title}" because it is ${supportingDetails.join(", ")}.${otherText}`;
 }
 
 function buildBreakdownPreview(workType: string, estimatedMinutes: number, cognitiveLoad: number) {
@@ -775,6 +649,143 @@ function isPlanningRequest(text: string) {
       text,
     )
   );
+}
+
+function looksLikeChatQuery(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes("?")) return true;
+
+  return /^(what|whats|what's|when|where|who|whose|why|how|how's|hows|which|do|does|did|is|are|am|was|were|will|would|should|can|could|tell|show|list|find|give|remind|any|got)\b/i.test(
+    trimmed,
+  );
+}
+
+async function loadChatQueryContext(userId: string) {
+  const today = parseLocalDateKey(getLocalDateKey()) ?? startOfLocalDate(new Date());
+  const todayEnd = endOfLocalDate(today);
+  const weekEnd = addDays(today, 7);
+
+  const [events, blocks, dueTasks, activeTasks, todayCheckin, recentInsights] = await Promise.all([
+    prisma.calendarEvent.findMany({
+      where: {
+        userId,
+        status: { not: "cancelled" },
+        startTime: { gte: today, lt: weekEnd },
+      },
+      orderBy: { startTime: "asc" },
+      take: 25,
+      select: { title: true, startTime: true, endTime: true, isAllDay: true, location: true },
+    }),
+    prisma.scheduledBlock.findMany({
+      where: {
+        userId,
+        status: { notIn: ["completed", "cancelled", "skipped"] },
+        startTime: { gte: today, lt: weekEnd },
+      },
+      orderBy: { startTime: "asc" },
+      take: 25,
+      include: { task: { select: { title: true } } },
+    }),
+    prisma.task.findMany({
+      where: {
+        userId,
+        status: { notIn: ["completed", "cancelled"] },
+        dueAt: { gte: today, lt: weekEnd },
+      },
+      orderBy: [{ dueAt: "asc" }, { priority: "asc" }],
+      take: 15,
+      select: {
+        title: true,
+        priority: true,
+        cognitiveLoad: true,
+        estimatedMinutes: true,
+        dueAt: true,
+        type: true,
+        workType: true,
+      },
+    }),
+    prisma.task.findMany({
+      where: {
+        userId,
+        status: { notIn: ["completed", "cancelled"] },
+        OR: [{ dueAt: null }, { dueAt: { gte: weekEnd } }],
+      },
+      orderBy: [{ priority: "asc" }, { cognitiveLoad: "desc" }, { createdAt: "desc" }],
+      take: 10,
+      select: {
+        title: true,
+        priority: true,
+        cognitiveLoad: true,
+        estimatedMinutes: true,
+        dueAt: true,
+        type: true,
+        workType: true,
+      },
+    }),
+    prisma.dailyCheckin.findUnique({
+      where: { userId_checkinDate: { userId, checkinDate: today } },
+      select: { energyScore: true, stressScore: true, availableCapacityMinutes: true, userNote: true },
+    }),
+    prisma.aiInsight.findMany({
+      where: { userId, scope: { in: ["daily", "weekly"] } },
+      orderBy: { createdAt: "desc" },
+      take: 2,
+      select: { title: true, body: true, scope: true, createdAt: true },
+    }),
+  ]);
+
+  const formatDate = (date: Date | null) => (date ? date.toISOString() : null);
+
+  return {
+    todayDate: today.toISOString().slice(0, 10),
+    todayRange: { start: today.toISOString(), end: todayEnd.toISOString() },
+    upcomingEvents: events.map((event) => ({
+      title: event.title,
+      startTime: formatDate(event.startTime),
+      endTime: formatDate(event.endTime),
+      isAllDay: event.isAllDay,
+      location: event.location,
+    })),
+    upcomingScheduledBlocks: blocks.map((block) => ({
+      title: block.title,
+      startTime: formatDate(block.startTime),
+      endTime: formatDate(block.endTime),
+      taskTitle: block.task?.title ?? null,
+    })),
+    tasksDueThisWeek: dueTasks.map((task) => ({
+      title: task.title,
+      priority: task.priority,
+      cognitiveLoad: task.cognitiveLoad,
+      estimatedMinutes: task.estimatedMinutes,
+      dueAt: formatDate(task.dueAt),
+      type: task.type,
+      workType: task.workType,
+    })),
+    otherActiveTasks: activeTasks.map((task) => ({
+      title: task.title,
+      priority: task.priority,
+      cognitiveLoad: task.cognitiveLoad,
+      estimatedMinutes: task.estimatedMinutes,
+      dueAt: formatDate(task.dueAt),
+      type: task.type,
+      workType: task.workType,
+    })),
+    todayCheckin: todayCheckin
+      ? {
+          energyScore: todayCheckin.energyScore,
+          stressScore: todayCheckin.stressScore,
+          availableCapacityMinutes: todayCheckin.availableCapacityMinutes,
+          note: todayCheckin.userNote,
+        }
+      : null,
+    recentInsights: recentInsights.map((insight) => ({
+      title: insight.title,
+      body: insight.body,
+      scope: insight.scope,
+      createdAt: insight.createdAt.toISOString(),
+    })),
+  };
 }
 
 async function hasDailyCheckinForToday(userId: string) {
@@ -1429,33 +1440,6 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
     },
   });
 
-  const taskQueryAnswer = await answerTaskPriorityQuery(userId, input.content);
-  if (taskQueryAnswer) {
-    const assistantMessage = await prisma.chatMessage.create({
-      data: {
-        userId,
-        threadId: thread.id,
-        role: "assistant",
-        content: taskQueryAnswer,
-      },
-    });
-
-    await prisma.chatThread.update({
-      where: { id: thread.id },
-      data: { updatedAt: new Date() },
-    });
-
-    return {
-      ok: true as const,
-      value: {
-        thread,
-        userMessage,
-        assistantMessage,
-        actions: [],
-      },
-    };
-  }
-
   const latestExecutedCreateTask = await prisma.aiAction.findFirst({
     where: { userId, threadId: thread.id, status: "executed", actionType: "CREATE_TASK" },
     orderBy: { executedAt: "desc" },
@@ -1550,6 +1534,38 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
   const rawActions = process.env.BACKBOARD_API_KEY
     ? await parseWithBackboard(input.content, thread.id)
     : await parseGeminiChatMessage(input.content, { correctionExamples });
+
+  if (rawActions.length === 0 && looksLikeChatQuery(input.content)) {
+    const queryContext = await loadChatQueryContext(userId);
+    const answer = await answerChatQuery(input.content, queryContext);
+
+    if (answer) {
+      const assistantMessage = await prisma.chatMessage.create({
+        data: {
+          userId,
+          threadId: thread.id,
+          role: "assistant",
+          content: answer,
+        },
+      });
+
+      await prisma.chatThread.update({
+        where: { id: thread.id },
+        data: { updatedAt: new Date() },
+      });
+
+      return {
+        ok: true as const,
+        value: {
+          thread,
+          userMessage,
+          assistantMessage,
+          actions: [],
+        },
+      };
+    }
+  }
+
   const fallbackActions = rawActions.length > 0 ? rawActions : parseMockChatMessage(input.content);
   const parsedActions = normalizeParsedActions(fallbackActions, input.content);
   const shouldPromptForCheckin =

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Cormorant_Garamond, Plus_Jakarta_Sans } from "next/font/google";
 import Navbar from "./_components/navbar/navbar";
+import BodyScrollReset from "./_components/body-scroll-reset";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,6 +45,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${cormorantGaramond.variable} ${plusJakartaSans.variable} h-full antialiased`}
     >
       <body className="pb-16">
+        <BodyScrollReset />
         {children}
         <Navbar />
       </body>

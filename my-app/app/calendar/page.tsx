@@ -75,9 +75,10 @@ export default async function Calendar({ searchParams }: CalendarPageProps) {
         cognitiveLoad: null,
       })),
     ...schedule.scheduledBlocks
-      .filter((block) => block.status !== "cancelled")
+      .filter((block) => block.status !== "cancelled" && block.status !== "skipped" && block.task?.status !== "cancelled")
       .map((block) => ({
         id: block.id,
+        taskId: block.taskId,
         kind: "block" as const,
         title: block.title,
         startTime: block.startTime.toISOString(),

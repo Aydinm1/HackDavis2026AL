@@ -682,7 +682,7 @@ export function CreateSheet({
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
+      document.body.style.overflow = previous === "hidden" ? "" : previous;
     };
   }, [onCancel]);
 
