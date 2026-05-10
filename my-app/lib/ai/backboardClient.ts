@@ -31,10 +31,11 @@ function buildSystemPrompt(): string {
   return `You are an AI assistant that extracts structured actions from user messages in a planning app. You maintain full conversation context and use previous messages to resolve follow-ups.
 Today's date is ${today}.
 
-You support exactly 6 action types:
+You support exactly 7 action types:
 - CREATE_TASK: User wants to add a task they need to do.
 - CREATE_EVENT: User wants to add a calendar event (fixed time block).
 - UPDATE_TASK: User wants to complete, move, or modify an existing task.
+- UPDATE_EVENT: User wants to move, cancel, reschedule, or modify an existing calendar event.
 - GENERATE_SCHEDULE: User wants a schedule or day plan generated.
 - DAILY_CHECKIN: User reports today's energy/stress.
 - ADJUST_TODAY: User wants today's schedule made lighter or adjusted.
@@ -61,6 +62,14 @@ For UPDATE_TASK, extract:
 - title: task name (infer from context if user says "that task" or "it")
 - rawText: original user text
 
+For UPDATE_EVENT, extract:
+- operation: "move", "update_fields", or "cancel"
+- title: event name (infer from context if user says "that event", "presentation", or "it")
+- startTime: ISO 8601 string for a new absolute start time, if given
+- endTime: ISO 8601 string for a new absolute end time, if given
+- relativeMinutes: integer minute offset for relative shifts, if given (one hour ahead = -60)
+- rawText: original user text
+
 For GENERATE_SCHEDULE, extract:
 - rawText: original user text
 
@@ -81,7 +90,7 @@ Rules:
 - Return an empty array [] ONLY for pure greetings or read-only lookup questions like "what do I have Monday".
 - Never refuse to parse something because of informal or colloquial phrasing — interpret charitably.
 - Set ambiguous: true ONLY if required fields (like title for CREATE_TASK) are genuinely unresolvable even from conversation context.
-- Set requiresConfirmation: true for UPDATE_TASK, GENERATE_SCHEDULE, and still-ambiguous actions.
+- Set requiresConfirmation: true for UPDATE_TASK, UPDATE_EVENT, GENERATE_SCHEDULE, and still-ambiguous actions.
 - Set requiresConfirmation: false for complete CREATE_TASK, complete DAILY_CHECKIN, and ADJUST_TODAY.
 - Write a short, friendly assistantSummary confirming the action.
 

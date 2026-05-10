@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 
 export type KikiboubaInitialState = {
   energyScore: number;
@@ -63,13 +63,12 @@ function formatSavedAt(value: string | null) {
   }).format(new Date(value));
 }
 
-function shapeMaskStyle(shape: ShapeDefinition, background: string) {
+function shapeMaskStyle(shape: ShapeDefinition): CSSProperties {
   if (!shape.assetUrl) {
-    return { background };
+    return {};
   }
 
   return {
-    background,
     maskImage: `url("${shape.assetUrl}")`,
     WebkitMaskImage: `url("${shape.assetUrl}")`,
     maskRepeat: "no-repeat",
@@ -81,9 +80,17 @@ function shapeMaskStyle(shape: ShapeDefinition, background: string) {
   };
 }
 
+function activeShapeStyle(shape: ShapeDefinition, gradient: string): CSSProperties {
+  return {
+    ...shapeMaskStyle(shape),
+    background: gradient,
+  };
+}
+
 export function KikiboubaClient({ initialState }: { initialState: KikiboubaInitialState }) {
   const [energyScore, setEnergyScore] = useState(initialState.energyScore);
   const [stressScore, setStressScore] = useState(initialState.stressScore);
+  const [motionKey, setMotionKey] = useState(0);
   const [savedAt, setSavedAt] = useState(initialState.loggedAt);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -91,6 +98,17 @@ export function KikiboubaClient({ initialState }: { initialState: KikiboubaIniti
 
   const activeShape = stressShapes[stressScore];
   const activeGradient = energyGradients[energyScore];
+
+  function handleEnergyChange(value: number) {
+    setEnergyScore(value);
+    setMotionKey((current) => current + 1);
+  }
+
+  function handleStressChange(value: number) {
+    setStressScore(value);
+    setMotionKey((current) => current + 1);
+  }
+
   async function saveCheckin() {
     setIsSaving(true);
     setError(null);
@@ -154,7 +172,7 @@ export function KikiboubaClient({ initialState }: { initialState: KikiboubaIniti
                   max="7"
                   step="1"
                   value={energyScore}
-                  onChange={(event) => setEnergyScore(Number(event.target.value))}
+                  onChange={(event) => handleEnergyChange(Number(event.target.value))}
                   className="h-2 w-full accent-emerald-600"
                 />
                 <span className="flex justify-between text-xs font-normal text-zinc-500">
@@ -176,7 +194,7 @@ export function KikiboubaClient({ initialState }: { initialState: KikiboubaIniti
                   max="7"
                   step="1"
                   value={stressScore}
-                  onChange={(event) => setStressScore(Number(event.target.value))}
+                  onChange={(event) => handleStressChange(Number(event.target.value))}
                   className="h-2 w-full accent-zinc-950"
                 />
                 <span className="flex justify-between text-xs font-normal text-zinc-500">
@@ -204,9 +222,14 @@ export function KikiboubaClient({ initialState }: { initialState: KikiboubaIniti
           <div className="flex min-h-[420px] flex-col items-center justify-center gap-8">
             <div
               aria-label={`Kikibouba preview: ${activeShape.label}, ${scoreLabel("energy", energyScore)}`}
-              className={`h-64 w-64 transition-all duration-300 ease-out ${activeShape.className}`}
-              style={shapeMaskStyle(activeShape, activeGradient)}
-            />
+              className="relative h-72 w-72 overflow-visible"
+            >
+              <div
+                key={`shape-stage-${motionKey}`}
+                className={`kikibouba-stage-shape absolute inset-0 motion-reduce:animate-none ${activeShape.className}`}
+                style={activeShapeStyle(activeShape, activeGradient)}
+              />
+            </div>
 
             <div className="grid w-full max-w-md grid-cols-2 gap-3">
               <div className="rounded-md bg-zinc-50 px-3 py-2">
@@ -222,6 +245,9 @@ export function KikiboubaClient({ initialState }: { initialState: KikiboubaIniti
                   Energy {energyScore}/7
                 </div>
                 <div className="mt-1 text-xs text-zinc-500">{scoreLabel("energy", energyScore)}</div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-200">
+                  <div className="h-full" style={{ background: activeGradient }} />
+                </div>
               </div>
             </div>
 
@@ -231,6 +257,21 @@ export function KikiboubaClient({ initialState }: { initialState: KikiboubaIniti
           </div>
         </section>
       </div>
+      <style>{`
+        .kikibouba-stage-shape {
+          animation: kikibouba-stage-settle 420ms cubic-bezier(0.22, 1, 0.36, 1);
+          transform-origin: center;
+        }
+
+        @keyframes kikibouba-stage-settle {
+          0% {
+            transform: scale(0.94) rotate(-1.5deg);
+          }
+          100% {
+            transform: scale(1) rotate(0deg);
+          }
+        }
+      `}</style>
     </main>
   );
 }

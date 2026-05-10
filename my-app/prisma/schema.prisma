@@ -28,6 +28,7 @@ model User {
   chatThreads     ChatThread[]
   chatMessages    ChatMessage[]
   aiActions       AiAction[]
+  aiCorrections   AiCorrection[]
   uploadedInputs  UploadedInput[]
 }
 
@@ -339,6 +340,7 @@ model ChatThread {
 
   messages  ChatMessage[]
   aiActions AiAction[]
+  aiCorrections AiCorrection[]
 
   @@index([userId, updatedAt])
 }
@@ -359,6 +361,7 @@ model ChatMessage {
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   aiActions AiAction[]
+  aiCorrections AiCorrection[]
 
   @@index([threadId, createdAt])
 }
@@ -386,8 +389,41 @@ model AiAction {
   thread  ChatThread?  @relation(fields: [threadId], references: [id])
   message ChatMessage? @relation(fields: [messageId], references: [id])
 
+  aiCorrections AiCorrection[]
+
   @@index([userId, status])
   @@index([threadId])
+}
+
+model AiCorrection {
+  id     String @id @default(cuid())
+  userId String
+
+  aiActionId String?
+  threadId   String?
+  messageId  String?
+
+  correctionType String // confirmed | edited | cancelled | failed
+  source         String @default("chat") // chat | image | voice | system
+  actionType     String
+
+  originalUserText String?
+  proposedPayload  Json
+  correctedPayload Json?
+  finalPayload     Json?
+  errorMessage     String?
+
+  createdAt DateTime @default(now())
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiAction AiAction?    @relation(fields: [aiActionId], references: [id], onDelete: SetNull)
+  thread   ChatThread?  @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  message  ChatMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([userId, correctionType])
+  @@index([userId, actionType])
+  @@index([aiActionId])
 }
 
 model UploadedInput {

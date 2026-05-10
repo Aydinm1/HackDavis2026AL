@@ -63,6 +63,7 @@ type ChatEntry = {
   actions?: AiAction[];
   imageDataUrl?: string;
   imageDataUrls?: string[];
+  metadata?: Record<string, unknown> | null;
 };
 
 type ActionResult = {
@@ -155,6 +156,19 @@ function formatLongDate(value: string) {
   return `${weekday}, ${month} ${day}${ordinalSuffix(day)}, ${d.getFullYear()}`;
 }
 
+function formatDateTime(value: unknown) {
+  if (typeof value !== "string") return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function ActionCard({
   action,
   onConfirm,
@@ -236,21 +250,113 @@ function ActionCard({
   );
 }
 
+function InlineCheckinForm({ onSubmit }: { onSubmit: (text: string) => void }) {
+  const [energyScore, setEnergyScore] = useState(4);
+  const [stressScore, setStressScore] = useState(4);
+  const [note, setNote] = useState("");
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  function submitCheckin() {
+    if (isSubmitted) return;
+    const trimmedNote = note.trim();
+    setIsSubmitted(true);
+    onSubmit(`energy ${energyScore} stress ${stressScore}${trimmedNote ? ` note: ${trimmedNote}` : ""}`);
+  }
+
+  return (
+    <div className="w-full max-w-sm rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-zinc-900 shadow-sm">
+      <div className="space-y-4">
+        <label className="grid gap-2 text-xs font-medium text-zinc-700">
+          <span className="flex items-center justify-between gap-3">
+            Energy
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600">{energyScore}/7</span>
+          </span>
+          <input
+            type="range"
+            min="1"
+            max="7"
+            step="1"
+            value={energyScore}
+            disabled={isSubmitted}
+            onChange={(event) => setEnergyScore(Number(event.target.value))}
+            className="h-2 w-full accent-cyan-700"
+          />
+          <span className="flex justify-between text-[11px] font-normal text-zinc-500">
+            <span>drained</span>
+            <span>energized</span>
+          </span>
+        </label>
+
+        <label className="grid gap-2 text-xs font-medium text-zinc-700">
+          <span className="flex items-center justify-between gap-3">
+            Stress
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600">{stressScore}/7</span>
+          </span>
+          <input
+            type="range"
+            min="1"
+            max="7"
+            step="1"
+            value={stressScore}
+            disabled={isSubmitted}
+            onChange={(event) => setStressScore(Number(event.target.value))}
+            className="h-2 w-full accent-zinc-900"
+          />
+          <span className="flex justify-between text-[11px] font-normal text-zinc-500">
+            <span>calm</span>
+            <span>overloaded</span>
+          </span>
+        </label>
+
+        <label className="grid gap-2 text-xs font-medium text-zinc-700">
+          Notes
+          <textarea
+            value={note}
+            disabled={isSubmitted}
+            onChange={(event) => setNote(event.target.value)}
+            rows={3}
+            placeholder="Optional context for today's plan"
+            className="resize-none rounded-md border border-cyan-100 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-cyan-400"
+          />
+        </label>
+
+        <button
+          type="button"
+          onClick={submitCheckin}
+          disabled={isSubmitted}
+          className="w-full rounded-md bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:bg-zinc-400"
+        >
+          {isSubmitted ? "Check-in sent" : "Confirm check-in"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Message({
   entry,
   onConfirm,
   onCancel,
+  onCheckinSubmit,
   pendingActionIds,
   onImageClick,
 }: {
   entry: ChatEntry;
   onConfirm: (actionId: string) => void;
   onCancel: (actionId: string) => void;
+  onCheckinSubmit: (text: string) => void;
   pendingActionIds: Set<string>;
   onImageClick: (src: string) => void;
 }) {
   const isUser = entry.role === "user";
   const imageUrls = entry.imageDataUrls ?? (entry.imageDataUrl ? [entry.imageDataUrl] : []);
+  const visibleActions = entry.actions?.filter((action) => action.inputPayload.missingBeforeSchedule !== true) ?? [];
+  const showCheckinForm =
+    !isUser &&
+    (entry.metadata?.checkinPrompt === true ||
+      entry.actions?.some(
+        (action) => action.actionType === "DAILY_CHECKIN" && action.inputPayload.missingBeforeSchedule === true,
+      ));
   return (
     <div className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
       {imageUrls.length > 0 && (
@@ -310,6 +416,7 @@ type DbMessage = {
   id: string;
   role: string;
   content: string;
+  metadata: unknown;
   aiActions: DbAiAction[];
 };
 
@@ -335,6 +442,9 @@ function dbMessageToChatEntry(msg: DbMessage): ChatEntry | null {
   return {
     role: msg.role as "user" | "assistant",
     content: msg.content,
+    metadata: (typeof msg.metadata === "object" && msg.metadata !== null && !Array.isArray(msg.metadata)
+      ? msg.metadata
+      : null) as Record<string, unknown> | null,
     actions: actions.length > 0 ? actions : undefined,
   };
 }
