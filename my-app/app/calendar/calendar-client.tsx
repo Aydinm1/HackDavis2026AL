@@ -39,6 +39,23 @@ type RescheduleSuggestion = {
   reason: string;
 } | null;
 
+type SyncedCalendarEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  startTime: string;
+  endTime: string;
+  status: string;
+};
+
+type GoogleCalendarStatus = {
+  state?: string;
+  imported?: string;
+  sync?: string;
+  message?: string;
+};
+
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -80,11 +97,27 @@ function generatedBlockToItem(block: GeneratedScheduleBlock): CalendarItemViewMo
   };
 }
 
+function syncedEventToItem(event: SyncedCalendarEvent): CalendarItemViewModel {
+  return {
+    id: event.id,
+    kind: "event",
+    title: event.title,
+    subtitle: event.location || event.description || "Google Calendar event",
+    startTime: event.startTime,
+    endTime: event.endTime,
+    status: event.status,
+    taskTitle: null,
+    reason: null,
+  };
+}
+
 export function CalendarClient({
   initialItems,
+  googleCalendarStatus,
   scheduleRange,
 }: {
   initialItems: CalendarItemViewModel[];
+  googleCalendarStatus: GoogleCalendarStatus;
   scheduleRange: { start: string; end: string };
 }) {
   const router = useRouter();
@@ -92,6 +125,7 @@ export function CalendarClient({
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
   const [busyBlockId, setBusyBlockId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
   const [unscheduledTasks, setUnscheduledTasks] = useState<UnscheduledTask[]>([]);
   const [rescheduleSuggestion, setRescheduleSuggestion] = useState<{
     title: string;
@@ -167,6 +201,35 @@ export function CalendarClient({
     }
   }
 
+  async function syncGoogleCalendar() {
+    setError(null);
+    setIsSyncingGoogle(true);
+
+    try {
+      const response = await fetch("/api/calendar/google/sync", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to sync Google Calendar.");
+
+      const syncedEvents = ((body.data?.events ?? []) as SyncedCalendarEvent[])
+        .filter((event) => event.status !== "cancelled")
+        .map(syncedEventToItem);
+      setItems((current) => {
+        const withoutSyncedEvents = current.filter(
+          (item) => !syncedEvents.some((event) => event.kind === item.kind && event.id === item.id),
+        );
+
+        return [...withoutSyncedEvents, ...syncedEvents].sort(
+          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+        );
+      });
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to sync Google Calendar.");
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  }
+
   async function completeBlock(item: CalendarItemViewModel) {
     setError(null);
     setRescheduleSuggestion(null);
@@ -228,15 +291,48 @@ export function CalendarClient({
             Generate proposed work blocks around fixed calendar events for this demo week.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={generateSchedule}
-          disabled={isGenerating}
-          className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-        >
-          {isGenerating ? "Generating..." : "Generate Schedule"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="/api/calendar/google/connect"
+            className="rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700"
+          >
+            Link Google Calendar
+          </a>
+          <button
+            type="button"
+            onClick={syncGoogleCalendar}
+            disabled={isSyncingGoogle}
+            className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-400"
+          >
+            {isSyncingGoogle ? "Syncing..." : "Sync Google"}
+          </button>
+          <button
+            type="button"
+            onClick={generateSchedule}
+            disabled={isGenerating}
+            className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+          >
+            {isGenerating ? "Generating..." : "Generate Schedule"}
+          </button>
+        </div>
       </div>
+
+      {googleCalendarStatus.state === "connected" && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+          Google Calendar connected
+          {googleCalendarStatus.imported ? ` and imported ${googleCalendarStatus.imported} events.` : "."}
+          {googleCalendarStatus.sync === "error" && googleCalendarStatus.message
+            ? ` Sync needs attention: ${googleCalendarStatus.message}`
+            : null}
+        </div>
+      )}
+
+      {googleCalendarStatus.state === "error" && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          Google Calendar connection failed
+          {googleCalendarStatus.message ? `: ${googleCalendarStatus.message}` : "."}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">

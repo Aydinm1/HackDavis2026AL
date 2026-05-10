@@ -4,6 +4,15 @@ import { CalendarClient, type CalendarItemViewModel } from "./calendar-client";
 
 export const dynamic = "force-dynamic";
 
+type CalendarPageProps = {
+  searchParams?: Promise<{
+    gcal?: string;
+    imported?: string;
+    sync?: string;
+    message?: string;
+  }>;
+};
+
 const demoRange = {
   start: new Date("2026-05-11T00:00:00-07:00"),
   end: new Date("2026-05-18T00:00:00-07:00"),
@@ -13,7 +22,8 @@ function minutesBetween(startTime: Date, endTime: Date) {
   return Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
 }
 
-export default async function Calendar() {
+export default async function Calendar({ searchParams }: CalendarPageProps) {
+  const params = await searchParams;
   const schedule = await getSchedule(getCurrentUserId(), demoRange);
   const items: CalendarItemViewModel[] = [
     ...schedule.calendarEvents
@@ -84,6 +94,12 @@ export default async function Calendar() {
 
         <CalendarClient
           initialItems={items}
+          googleCalendarStatus={{
+            state: params?.gcal,
+            imported: params?.imported,
+            sync: params?.sync,
+            message: params?.message,
+          }}
           scheduleRange={{
             start: demoRange.start.toISOString(),
             end: demoRange.end.toISOString(),
