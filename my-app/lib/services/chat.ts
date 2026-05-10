@@ -1050,7 +1050,7 @@ async function recordAndMaybeExecuteAction(params: {
 
 function buildAssistantResponse(actions: MockParsedAction[]) {
   if (actions.length === 0) {
-    return "I did not find a task, event, schedule, or update action in that message.";
+    return "I couldn't parse an action from that — this sometimes happens when a phrase triggers Gemini's content filter. Try rephrasing (e.g. \"hang out with Leon at 2am\" instead of violent-sounding slang) and I'll add it.";
   }
 
   return actions.map((action) => action.assistantSummary).join(" ");

@@ -659,23 +659,24 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      // Upload each queued image sequentially
-      for (const img of imagesToSend) {
+      if (imagesToSend.length > 0) {
+        // Images (+ optional text) go together as one multimodal Gemini call
         const res = await fetch("/api/uploads/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageData: img.base64, mimeType: img.mimeType }),
+          body: JSON.stringify({
+            images: imagesToSend.map((i) => ({ imageData: i.base64, mimeType: i.mimeType })),
+            textMessage: trimmed || undefined,
+          }),
         });
         const json = await res.json() as { data?: UploadResponseData; error?: string };
         if (!res.ok || !json.data) {
           setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Image upload failed." }]);
-          continue;
+          return;
         }
         handleUploadResult(json.data);
-      }
-
-      // Send text as chat message if provided
-      if (trimmed) {
+      } else if (trimmed) {
+        // Text-only goes to the chat endpoint
         const res = await fetch("/api/chat/message", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

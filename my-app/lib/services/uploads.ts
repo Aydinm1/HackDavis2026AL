@@ -12,8 +12,8 @@ export type VoiceUploadInput = {
 };
 
 export type ImageUploadInput = {
-  imageData: string;
-  mimeType: string;
+  images: { imageData: string; mimeType: string }[];
+  textMessage?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,15 +45,30 @@ export function validateImageUploadBody(body: unknown): ValidationResult<ImageUp
     return { ok: false, error: "Request body must be a JSON object." };
   }
 
-  if (typeof body.imageData !== "string" || !body.imageData) {
-    return { ok: false, error: "imageData is required and must be a non-empty string." };
+  if (!Array.isArray(body.images) || body.images.length === 0) {
+    return { ok: false, error: "images must be a non-empty array." };
   }
 
-  if (typeof body.mimeType !== "string" || !body.mimeType) {
-    return { ok: false, error: "mimeType is required and must be a non-empty string." };
+  for (const img of body.images) {
+    if (!isRecord(img) || typeof img.imageData !== "string" || !img.imageData) {
+      return { ok: false, error: "Each image must have a non-empty imageData string." };
+    }
+    if (typeof img.mimeType !== "string" || !img.mimeType) {
+      return { ok: false, error: "Each image must have a non-empty mimeType string." };
+    }
   }
 
-  return { ok: true, value: { imageData: body.imageData, mimeType: body.mimeType } };
+  const textMessage = typeof body.textMessage === "string" && body.textMessage.trim()
+    ? body.textMessage.trim()
+    : undefined;
+
+  return {
+    ok: true,
+    value: {
+      images: body.images as { imageData: string; mimeType: string }[],
+      textMessage,
+    },
+  };
 }
 
 export async function createVoiceUpload(userId: string, input: VoiceUploadInput) {
@@ -102,7 +117,10 @@ export async function createVoiceUpload(userId: string, input: VoiceUploadInput)
 }
 
 export async function createImageUpload(userId: string, input: ImageUploadInput) {
-  const parts = [{ inlineData: { data: input.imageData, mimeType: input.mimeType } }];
+  const parts = [
+    ...input.images.map((img) => ({ inlineData: { data: img.imageData, mimeType: img.mimeType } })),
+    ...(input.textMessage ? [{ text: input.textMessage }] : []),
+  ];
   const parsedActions = await parseGeminiMultimodal(parts, "image");
 
   const parsedItems = parsedActions.map((action) => ({

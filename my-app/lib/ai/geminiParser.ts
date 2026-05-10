@@ -188,14 +188,17 @@ For ADJUST_TODAY, extract:
 - rawText: original user text
 
 Rules:
-- Return an empty array [] if the message has no actionable intent (e.g. questions, greetings, casual chat).
+- Return an empty array [] ONLY for pure greetings or read-only questions. If there is ANY hint of a task, event, plan, or activity — extract it.
 - Return an empty array [] for read-only questions like "what do I have to do Monday", "what is my highest priority task Monday", or "show my top task Friday". Do not turn those into GENERATE_SCHEDULE.
+- Never refuse to parse something because the wording sounds unusual, informal, or colloquial. Take the user at their word and extract the best-fit action.
+- Interpret all colloquial, slang, and informal expressions as social plans or tasks. "beat [someone] up", "link up", "hang with", "kick it with", "chill with", "vibe with", "pull up on", "see [someone]" all mean meeting/socializing → CREATE_EVENT.
+- Social plans with a time are CREATE_EVENT with a descriptive title using the person's name (e.g. "Hang with Raghav").
 - Set ambiguous: true if required fields for the action type are missing. DAILY_CHECKIN requires both energyScore and stressScore.
 - Set requiresConfirmation: true for UPDATE_TASK, GENERATE_SCHEDULE, and ambiguous actions.
 - Set requiresConfirmation: false for complete DAILY_CHECKIN actions.
 - Set requiresConfirmation: false for ADJUST_TODAY actions.
 - Write a short, friendly assistantSummary confirming or clarifying the action.
-- Only extract actions that are clearly intended. Do not hallucinate tasks.`;
+- Do not hallucinate tasks that have no basis in the message.`;
 
   const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
 
