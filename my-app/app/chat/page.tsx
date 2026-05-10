@@ -14,11 +14,18 @@ type AiAction = {
   errorMessage?: string | null;
 };
 
+type PendingImage = {
+  dataUrl: string;
+  base64: string;
+  mimeType: string;
+};
+
 type ChatEntry = {
   role: "user" | "assistant";
   content: string;
   actions?: AiAction[];
   imageDataUrl?: string;
+  imageDataUrls?: string[];
 };
 
 type ActionResult = {
@@ -286,15 +293,21 @@ function Message({
   pendingActionIds: Set<string>;
 }) {
   const isUser = entry.role === "user";
+  const imageUrls = entry.imageDataUrls ?? (entry.imageDataUrl ? [entry.imageDataUrl] : []);
   return (
     <div className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
-      {entry.imageDataUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={entry.imageDataUrl}
-          alt="Uploaded"
-          className="max-w-[60%] rounded-2xl rounded-br-sm border border-zinc-200 object-contain"
-        />
+      {imageUrls.length > 0 && (
+        <div className={`flex flex-wrap gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+          {imageUrls.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={url}
+              alt={`Uploaded image ${i + 1}`}
+              className="h-40 max-w-[240px] rounded-2xl rounded-br-sm border border-zinc-200 object-cover"
+            />
+          ))}
+        </div>
       )}
       {entry.content && (
         <div
@@ -379,6 +392,7 @@ export default function ChatPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [isRecording, setIsRecording] = useState(false);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -582,69 +596,65 @@ export default function ChatPage() {
     }
   }
 
-  async function sendImage(imageData: string, mimeType: string, dataUrl: string) {
-    setLoading(true);
-    setMessages((prev) => [...prev, { role: "user", content: "", imageDataUrl: dataUrl }]);
-    try {
-      const res = await fetch("/api/uploads/image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageData, mimeType }),
-      });
-      const json = await res.json() as { data?: UploadResponseData; error?: string };
-      if (!res.ok || !json.data) {
-        setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Image upload failed." }]);
-        return;
-      }
-      handleUploadResult(json.data);
-    } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "Network error during image upload." }]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleImageFile(file: File) {
+  function queueImageFile(file: File) {
     const reader = new FileReader();
     reader.onloadend = () => {
       const dataUrl = reader.result as string;
       const base64 = dataUrl.split(",")[1];
-      void sendImage(base64, file.type, dataUrl);
+      setPendingImages((prev) => [...prev, { dataUrl, base64, mimeType: file.type }]);
     };
     reader.readAsDataURL(file);
   }
 
   async function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || loading) return;
+    const imagesToSend = [...pendingImages];
+    if ((!trimmed && imagesToSend.length === 0) || loading) return;
 
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    setPendingImages([]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "user",
+        content: trimmed,
+        imageDataUrls: imagesToSend.length > 0 ? imagesToSend.map((i) => i.dataUrl) : undefined,
+      },
+    ]);
     setLoading(true);
 
     try {
-      const res = await fetch("/api/chat/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: trimmed, threadId }),
-      });
-
-      const json = await res.json() as { data?: { thread: { id: string }; assistantMessage: { content: string }; actions: AiAction[] }; error?: string };
-
-      if (!res.ok || !json.data) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: json.error ?? "Something went wrong." },
-        ]);
-        return;
+      // Upload each queued image sequentially
+      for (const img of imagesToSend) {
+        const res = await fetch("/api/uploads/image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageData: img.base64, mimeType: img.mimeType }),
+        });
+        const json = await res.json() as { data?: UploadResponseData; error?: string };
+        if (!res.ok || !json.data) {
+          setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Image upload failed." }]);
+          continue;
+        }
+        handleUploadResult(json.data);
       }
 
-      const { thread, assistantMessage, actions } = json.data;
-      setThreadId(thread.id);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: assistantMessage.content, actions },
-      ]);
+      // Send text as chat message if provided
+      if (trimmed) {
+        const res = await fetch("/api/chat/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: trimmed, threadId }),
+        });
+        const json = await res.json() as { data?: { thread: { id: string }; assistantMessage: { content: string }; actions: AiAction[] }; error?: string };
+        if (!res.ok || !json.data) {
+          setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Something went wrong." }]);
+          return;
+        }
+        const { thread, assistantMessage, actions } = json.data;
+        setThreadId(thread.id);
+        setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage.content, actions }]);
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -744,16 +754,39 @@ export default function ChatPage() {
         ref={imageInputRef}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleImageFile(file);
+          const files = Array.from(e.target.files ?? []);
+          files.forEach(queueImageFile);
           e.target.value = "";
         }}
       />
 
       {/* Input */}
-      <div className="border-t border-zinc-200 bg-white px-4 py-3">
+      <div className="border-t border-zinc-200 bg-white px-4 pt-3 pb-3">
+        {/* Pending image previews */}
+        {pendingImages.length > 0 && (
+          <div className="flex flex-wrap gap-2 max-w-3xl mx-auto mb-2">
+            {pendingImages.map((img, i) => (
+              <div key={i} className="relative group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={img.dataUrl}
+                  alt={`Image ${i + 1}`}
+                  className="h-16 w-16 rounded-xl object-cover border border-zinc-200"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                  className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-800 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2 max-w-3xl mx-auto">
           {/* Image button */}
           <button
@@ -806,7 +839,7 @@ export default function ChatPage() {
           />
           <button
             onClick={() => void send(input)}
-            disabled={loading || isRecording || !input.trim()}
+            disabled={loading || isRecording || (!input.trim() && pendingImages.length === 0)}
             className="shrink-0 h-[42px] w-[42px] rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-zinc-200 text-white disabled:text-zinc-400 flex items-center justify-center transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
