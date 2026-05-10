@@ -6,7 +6,7 @@ type ActionStatus = "proposed" | "executed" | "failed" | "cancelled";
 
 type AiAction = {
   id: string;
-  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE";
+  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN";
   status: ActionStatus;
   requiresConfirmation: boolean;
   inputPayload: Record<string, unknown>;
@@ -31,6 +31,7 @@ const ACTION_COLORS: Record<string, string> = {
   CREATE_EVENT: "bg-blue-100 text-blue-800 border-blue-200",
   UPDATE_TASK: "bg-amber-100 text-amber-800 border-amber-200",
   GENERATE_SCHEDULE: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  DAILY_CHECKIN: "bg-cyan-100 text-cyan-800 border-cyan-200",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -151,6 +152,10 @@ function ActionCard({
             <PayloadRow label="operation" value={p.operation} />
             <PayloadRow label="isAllDay" value={p.isAllDay} />
             <PayloadRow label="estimatedMinutes" value={p.estimatedMinutes} />
+            <PayloadRow label="energyScore" value={p.energyScore} />
+            <PayloadRow label="stressScore" value={p.stressScore} />
+            <PayloadRow label="capacity" value={p.availableCapacityMinutes} />
+            <PayloadRow label="checkinDate" value={p.checkinDate} />
             <PayloadRow label="trigger" value={p.trigger} />
             <PayloadRow label="ambiguous" value={p.ambiguous} />
           </>

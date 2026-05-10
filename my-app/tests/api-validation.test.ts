@@ -431,6 +431,45 @@ test("mock parser proposes schedule generation before creating blocks", () => {
   assert.match(actions[0]?.assistantSummary ?? "", /confirm/i);
 });
 
+test("mock parser creates daily check-in actions from explicit scores", () => {
+  const actions = parseMockChatMessage("energy 2 stress 6 and I have 90 minutes available");
+
+  assert.equal(actions[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(actions[0]?.requiresConfirmation, false);
+  assert.equal(actions[0]?.ambiguous, false);
+  assert.equal(actions[0]?.inputPayload.energyScore, 2);
+  assert.equal(actions[0]?.inputPayload.stressScore, 6);
+  assert.equal(actions[0]?.inputPayload.availableCapacityMinutes, 90);
+  assert.equal(actions[0]?.inputPayload.adjustToday, true);
+});
+
+test("mock parser prompts for missing daily check-in score", () => {
+  const actions = parseMockChatMessage("I'm drained today");
+
+  assert.equal(actions[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(actions[0]?.requiresConfirmation, true);
+  assert.equal(actions[0]?.ambiguous, true);
+  assert.equal(actions[0]?.inputPayload.energyScore, 2);
+  assert.equal(actions[0]?.inputPayload.stressScore, undefined);
+});
+
+test("mock parser maps natural language stress and energy to scores", () => {
+  const lowEnergyHighStress = parseMockChatMessage("I'm super stressed and low energy today");
+  const calmHighEnergy = parseMockChatMessage("feeling calm and energized right now");
+  const maxStress = parseMockChatMessage("my energy is high but stress is max");
+
+  assert.equal(lowEnergyHighStress[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(lowEnergyHighStress[0]?.ambiguous, false);
+  assert.equal(lowEnergyHighStress[0]?.inputPayload.energyScore, 2);
+  assert.equal(lowEnergyHighStress[0]?.inputPayload.stressScore, 6);
+
+  assert.equal(calmHighEnergy[0]?.inputPayload.energyScore, 6);
+  assert.equal(calmHighEnergy[0]?.inputPayload.stressScore, 2);
+
+  assert.equal(maxStress[0]?.inputPayload.energyScore, 6);
+  assert.equal(maxStress[0]?.inputPayload.stressScore, 7);
+});
+
 test("voice upload validation requires audioData and mimeType", () => {
   const valid = validateVoiceUploadBody({ audioData: "base64string==", mimeType: "audio/webm" });
   const missingAudio = validateVoiceUploadBody({ mimeType: "audio/webm" });
@@ -508,6 +547,25 @@ test("validateGeminiResponse passes through GENERATE_SCHEDULE with no required f
   assert.equal(result.length, 1);
   assert.equal(result[0]?.actionType, "GENERATE_SCHEDULE");
   assert.equal(result[0]?.requiresConfirmation, true);
+});
+
+test("validateGeminiResponse passes through valid DAILY_CHECKIN entry", () => {
+  const raw = [
+    {
+      actionType: "DAILY_CHECKIN",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Saved check-in.",
+      inputPayload: { energyScore: 3, stressScore: 6, availableCapacityMinutes: 120, adjustToday: true },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(result[0]?.inputPayload.energyScore, 3);
+  assert.equal(result[0]?.inputPayload.stressScore, 6);
 });
 
 test("validateGeminiResponse skips entries missing actionType", () => {

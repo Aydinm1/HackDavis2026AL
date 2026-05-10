@@ -1,7 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { parseGeminiChatMessage } from "@/lib/ai/geminiParser";
-import type { MockParsedAction } from "@/lib/ai/mockParser";
+import {
+  inferDailyEnergyScore,
+  inferDailyStressScore,
+  parseDailyAvailableCapacityMinutes,
+  type MockParsedAction,
+} from "@/lib/ai/mockParser";
 import { prisma } from "@/lib/db";
+import { upsertDailyCheckin } from "@/lib/services/checkins";
 import { generateSchedule } from "@/lib/services/scheduledBlocks";
 import { generateTaskBreakdown } from "@/lib/services/tasks";
 
@@ -63,6 +69,34 @@ function jsonObject(value: unknown): Prisma.InputJsonObject {
 
 function clampInteger(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalDateKey(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
 }
 
 function inferTaskWorkType(text: string) {
@@ -527,6 +561,48 @@ function normalizeGenerateScheduleAction(action: MockParsedAction, originalText:
   };
 }
 
+function normalizeDailyCheckinAction(action: MockParsedAction, originalText: string): MockParsedAction {
+  if (action.actionType !== "DAILY_CHECKIN") {
+    return action;
+  }
+
+  const payload = action.inputPayload;
+  const inferredEnergyScore = inferDailyEnergyScore(originalText);
+  const inferredStressScore = inferDailyStressScore(originalText);
+  const energyScore =
+    typeof payload.energyScore === "number" ? clampInteger(payload.energyScore, 1, 7) : inferredEnergyScore;
+  const stressScore =
+    typeof payload.stressScore === "number" ? clampInteger(payload.stressScore, 1, 7) : inferredStressScore;
+  const availableCapacityMinutes =
+    typeof payload.availableCapacityMinutes === "number"
+      ? Math.max(0, Math.round(payload.availableCapacityMinutes))
+      : parseDailyAvailableCapacityMinutes(originalText);
+  const checkinDate =
+    typeof payload.checkinDate === "string" && parseLocalDateKey(payload.checkinDate)
+      ? payload.checkinDate.slice(0, 10)
+      : getLocalDateKey();
+  const ambiguous = action.ambiguous || !energyScore || !stressScore;
+
+  return {
+    ...action,
+    requiresConfirmation: ambiguous,
+    ambiguous,
+    inputPayload: {
+      ...payload,
+      checkinDate,
+      energyScore,
+      stressScore,
+      availableCapacityMinutes,
+      userNote: typeof payload.userNote === "string" && payload.userNote.trim() ? payload.userNote.trim() : originalText,
+      adjustToday: true,
+      rawText: originalText,
+    },
+    assistantSummary: ambiguous
+      ? "Before I plan around today, tell me your energy and stress from 1-7, like \"energy 3 stress 6\"."
+      : `I saved today's check-in as energy ${energyScore}/7 and stress ${stressScore}/7, and generated a daily adjustment insight.`,
+  };
+}
+
 function addImplicitStudyActionIfNeeded(actions: MockParsedAction[], originalText: string) {
   if (!isImplicitStudyTask(originalText) || actions.some((action) => action.actionType === "CREATE_TASK")) {
     return actions;
@@ -569,11 +645,50 @@ function addImplicitEventActionIfNeeded(actions: MockParsedAction[], originalTex
 
 function normalizeParsedActions(actions: MockParsedAction[], originalText: string) {
   return addImplicitEventActionIfNeeded(addImplicitStudyActionIfNeeded(actions, originalText), originalText).map((action) =>
-    normalizeGenerateScheduleAction(
-      normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+    normalizeDailyCheckinAction(
+      normalizeGenerateScheduleAction(
+        normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+        originalText,
+      ),
       originalText,
     ),
   );
+}
+
+function isPlanningRequest(text: string) {
+  return /\b(schedule|plan my day|plan today|generate schedule|adjust today|plan my week|replan|reschedule)\b/i.test(text);
+}
+
+async function hasDailyCheckinForToday(userId: string) {
+  const today = parseLocalDateKey(getLocalDateKey()) ?? startOfLocalDate(new Date());
+
+  const checkin = await prisma.dailyCheckin.findUnique({
+    where: {
+      userId_checkinDate: {
+        userId,
+        checkinDate: today,
+      },
+    },
+    select: { id: true },
+  });
+
+  return Boolean(checkin);
+}
+
+function buildMissingCheckinPromptAction(originalText: string): MockParsedAction {
+  return {
+    actionType: "DAILY_CHECKIN",
+    requiresConfirmation: true,
+    ambiguous: true,
+    inputPayload: {
+      checkinDate: getLocalDateKey(),
+      adjustToday: true,
+      rawText: originalText,
+      missingBeforeSchedule: true,
+    },
+    assistantSummary:
+      "Before I generate or adjust today's plan, tell me your energy and stress from 1-7, like \"energy 3 stress 6\". You can include available minutes too.",
+  };
 }
 
 export function validateChatMessageBody(body: unknown): ValidationResult<ChatMessageInput> {
@@ -813,10 +928,44 @@ async function executeGenerateSchedule(userId: string, action: MockParsedAction)
   return result.value;
 }
 
+async function executeDailyCheckin(userId: string, action: MockParsedAction) {
+  const payload = action.inputPayload;
+  const checkinDate =
+    typeof payload.checkinDate === "string" ? parseLocalDateKey(payload.checkinDate) : parseLocalDateKey(getLocalDateKey());
+  const energyScore = typeof payload.energyScore === "number" ? clampInteger(payload.energyScore, 1, 7) : null;
+  const stressScore = typeof payload.stressScore === "number" ? clampInteger(payload.stressScore, 1, 7) : null;
+
+  if (!checkinDate) {
+    throw new Error("checkinDate must be a valid YYYY-MM-DD date.");
+  }
+
+  if (!energyScore || !stressScore) {
+    throw new Error("energyScore and stressScore are required.");
+  }
+
+  const result = await upsertDailyCheckin(userId, {
+    planningCycleId: typeof payload.planningCycleId === "string" ? payload.planningCycleId : null,
+    checkinDate,
+    energyScore,
+    stressScore,
+    availableCapacityMinutes:
+      typeof payload.availableCapacityMinutes === "number" ? Math.max(0, Math.round(payload.availableCapacityMinutes)) : null,
+    userNote: typeof payload.userNote === "string" ? payload.userNote : null,
+    adjustToday: typeof payload.adjustToday === "boolean" ? payload.adjustToday : true,
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+
+  return result.value;
+}
+
 async function executeAction(userId: string, action: MockParsedAction) {
   if (action.actionType === "CREATE_TASK") return executeCreateTask(userId, action);
   if (action.actionType === "CREATE_EVENT") return executeCreateEvent(userId, action);
   if (action.actionType === "UPDATE_TASK") return executeUpdateTask(userId, action);
+  if (action.actionType === "DAILY_CHECKIN") return executeDailyCheckin(userId, action);
   return executeGenerateSchedule(userId, action);
 }
 
@@ -929,8 +1078,13 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
   }
 
   const parsedActions = normalizeParsedActions(await parseGeminiChatMessage(input.content), input.content);
+  const shouldPromptForCheckin =
+    isPlanningRequest(input.content) &&
+    !parsedActions.some((action) => action.actionType === "DAILY_CHECKIN") &&
+    !(await hasDailyCheckinForToday(userId));
+  const actionableParsedActions = shouldPromptForCheckin ? [buildMissingCheckinPromptAction(input.content)] : parsedActions;
   const actions = await Promise.all(
-    parsedActions.map((action) =>
+    actionableParsedActions.map((action) =>
       recordAndMaybeExecuteAction({
         userId,
         threadId: thread.id,
@@ -945,7 +1099,7 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
       userId,
       threadId: thread.id,
       role: "assistant",
-      content: buildAssistantResponse(parsedActions),
+      content: buildAssistantResponse(actionableParsedActions),
       metadata: jsonObject({
         actionIds: actions.map((action) => action.id),
       }),

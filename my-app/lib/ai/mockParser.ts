@@ -1,5 +1,5 @@
 export type MockParsedAction = {
-  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE";
+  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN";
   requiresConfirmation: boolean;
   ambiguous: boolean;
   inputPayload: Record<string, unknown>;
@@ -121,6 +121,81 @@ function parseTaskTitle(text: string) {
   return "";
 }
 
+function parseCheckinScore(text: string, label: "energy" | "stress") {
+  const directMatch = text.match(new RegExp(`\\b${label}\\s*(?:is|=|:)?\\s*([1-7])\\b`, "i"));
+  if (directMatch) {
+    return Number(directMatch[1]);
+  }
+
+  const outOfMatch = text.match(new RegExp(`\\b([1-7])\\s*/\\s*7\\s+${label}\\b`, "i"));
+  if (outOfMatch) {
+    return Number(outOfMatch[1]);
+  }
+
+  return undefined;
+}
+
+export function inferDailyEnergyScore(text: string) {
+  const explicit = parseCheckinScore(text, "energy");
+  if (explicit) return explicit;
+
+  if (/\b(no energy|zero energy|completely drained|can't move|can barely function|burnt out|burned out)\b/i.test(text)) return 1;
+  if (/\b(fully energized|super energized|pumped|amazing energy|great energy)\b/i.test(text)) return 7;
+  if (/\b(energized|high energy|good energy|locked in|ready to go)\b/i.test(text)) return 6;
+  if (/\b(decent|alright|pretty good|some energy)\b/i.test(text)) return 5;
+  if (/\b(okay|ok|fine|average|normal|neutral)\b/i.test(text) && /\b(energy|feel|feeling)\b/i.test(text)) return 4;
+  if (/\b(kinda tired|kind of tired|a little tired|sluggish|low-ish energy|lowish energy)\b/i.test(text)) return 3;
+  if (/\b(drained|exhausted|wiped|wiped out|tired|low energy|really low energy|super low energy|dead|spent)\b/i.test(text)) return 2;
+
+  if (/\benergy\s+(?:is\s+)?low\b/i.test(text)) return 2;
+  if (/\benergy\s+(?:is\s+)?medium\b/i.test(text)) return 4;
+  if (/\benergy\s+(?:is\s+)?high\b/i.test(text)) return 6;
+
+  return undefined;
+}
+
+export function inferDailyStressScore(text: string) {
+  const explicit = parseCheckinScore(text, "stress");
+  if (explicit) return explicit;
+
+  if (/\b(no stress|zero stress|peaceful|totally calm)\b/i.test(text)) return 1;
+  if (/\b(max stress|maximum stress|stress\s+(?:is\s+)?max|stress\s+(?:is\s+)?maximum|crisis|can't cope|cannot cope|spiraling)\b/i.test(text)) return 7;
+  if (/\b(overwhelmed|very stressed|really stressed|super stressed|high stress|panicking|panic|anxious|freaking out)\b/i.test(text)) return 6;
+  if (/\b(stressed|busy|under pressure|pressure)\b/i.test(text)) return 5;
+  if (/\b(manageable|medium stress|average stress|normal stress)\b/i.test(text)) return 4;
+  if (/\b(a little stressed|slightly stressed|minor stress|kind of stressed|kinda stressed)\b/i.test(text)) return 3;
+  if (/\b(calm|low stress|not stressed|pretty calm)\b/i.test(text)) return 2;
+
+  if (/\bstress\s+(?:is\s+)?low\b/i.test(text)) return 2;
+  if (/\bstress\s+(?:is\s+)?medium\b/i.test(text)) return 4;
+  if (/\bstress\s+(?:is\s+)?high\b/i.test(text)) return 6;
+
+  return undefined;
+}
+
+export function parseDailyAvailableCapacityMinutes(text: string) {
+  const capacityMatch = text.match(/\b(?:available|capacity|free)\s+(?:for\s+)?(\d+)\s*(?:minutes?|mins?|m)\b/i);
+  if (capacityMatch) return Number(capacityMatch[1]);
+
+  const trailingCapacityMatch = text.match(/\b(\d+)\s*(?:minutes?|mins?|m)\s+(?:available|free)\b/i);
+  if (trailingCapacityMatch) return Number(trailingCapacityMatch[1]);
+
+  const hourCapacityMatch = text.match(/\b(?:available|capacity|free)\s+(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i);
+  if (hourCapacityMatch) return Math.round(Number(hourCapacityMatch[1]) * 60);
+
+  const trailingHourCapacityMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\s+(?:available|free)\b/i);
+  if (trailingHourCapacityMatch) return Math.round(Number(trailingHourCapacityMatch[1]) * 60);
+
+  return undefined;
+}
+
+function isDailyCheckinMessage(text: string) {
+  const hasScore = /\b(?:energy|stress)\s*(?:is|=|:)?\s*[1-7]\b/i.test(text);
+  const hasCheckinLanguage = /\b(check.?in|energy|stress|drained|exhausted|overwhelmed|stressed|available capacity|calm|energized|tired|anxious|burnt out|burned out)\b/i.test(text);
+  const hasIntensityLanguage = /\b(low|medium|high|super|very|really|zero|max|maximum)\b/i.test(text);
+  return hasScore || (hasCheckinLanguage && (hasIntensityLanguage || /\b(today|right now|rn|i'?m|i am|feeling|feel)\b/i.test(text)));
+}
+
 function isImplicitStudyTask(text: string) {
   return /\b(study|review|prepare|prep)\b/i.test(text) && /\b(midterm|exam|test|quiz|final)\b/i.test(text);
 }
@@ -149,6 +224,28 @@ export function parseMockChatMessage(content: string): MockParsedAction[] {
   const actions: MockParsedAction[] = [];
 
   if (!text) return actions;
+
+  if (isDailyCheckinMessage(text)) {
+    const energyScore = inferDailyEnergyScore(text);
+    const stressScore = inferDailyStressScore(text);
+    const ambiguous = !energyScore || !stressScore;
+
+    actions.push({
+      actionType: "DAILY_CHECKIN",
+      requiresConfirmation: ambiguous,
+      ambiguous,
+      inputPayload: {
+        energyScore,
+        stressScore,
+        availableCapacityMinutes: parseDailyAvailableCapacityMinutes(text),
+        userNote: text,
+        adjustToday: true,
+      },
+      assistantSummary: ambiguous
+        ? "I can save today's check-in, but I need both energy and stress from 1-7."
+        : `I logged today's check-in as energy ${energyScore}/7 and stress ${stressScore}/7, then generated a daily adjustment insight.`,
+    });
+  }
 
   if ((/\b(add|create|make)\b/i.test(text) && /\btask\b/i.test(text)) || isImplicitStudyTask(text)) {
     const title = parseTaskTitle(text) || inferStudyTitle(text);

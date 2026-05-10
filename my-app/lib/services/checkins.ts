@@ -107,8 +107,16 @@ function parseCheckinDate(value: unknown): ValidationResult<Date> {
     return { ok: false, error: "checkinDate must start with YYYY-MM-DD." };
   }
 
-  const date = new Date(`${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime())) {
+  const year = Number(dateOnly[1]);
+  const month = Number(dateOnly[2]);
+  const day = Number(dateOnly[3]);
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
     return { ok: false, error: "checkinDate must be a valid date." };
   }
 

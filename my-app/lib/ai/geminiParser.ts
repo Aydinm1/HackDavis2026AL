@@ -6,6 +6,7 @@ const VALID_ACTION_TYPES = new Set([
   "CREATE_EVENT",
   "UPDATE_TASK",
   "GENERATE_SCHEDULE",
+  "DAILY_CHECKIN",
 ]);
 
 const responseSchema = {
@@ -15,7 +16,7 @@ const responseSchema = {
     properties: {
       actionType: {
         type: "STRING",
-        enum: ["CREATE_TASK", "CREATE_EVENT", "UPDATE_TASK", "GENERATE_SCHEDULE"],
+        enum: ["CREATE_TASK", "CREATE_EVENT", "UPDATE_TASK", "GENERATE_SCHEDULE", "DAILY_CHECKIN"],
       },
       requiresConfirmation: { type: "BOOLEAN" },
       ambiguous: { type: "BOOLEAN" },
@@ -35,6 +36,12 @@ const responseSchema = {
           endTime: { type: "STRING" },
           isAllDay: { type: "BOOLEAN" },
           operation: { type: "STRING", enum: ["complete", "move"] },
+          energyScore: { type: "NUMBER" },
+          stressScore: { type: "NUMBER" },
+          availableCapacityMinutes: { type: "NUMBER" },
+          userNote: { type: "STRING" },
+          checkinDate: { type: "STRING" },
+          adjustToday: { type: "BOOLEAN" },
           rawText: { type: "STRING" },
         },
       },
@@ -136,11 +143,12 @@ export async function parseGeminiChatMessage(content: string): Promise<MockParse
   const systemInstruction = `You are an AI assistant that extracts structured actions from user messages.
 Today's date is ${today}.
 
-You support exactly 4 action types:
+You support exactly 5 action types:
 - CREATE_TASK: User wants to add a task they need to do.
 - CREATE_EVENT: User wants to add a calendar event (fixed time block).
 - UPDATE_TASK: User wants to complete, move, or modify an existing task.
 - GENERATE_SCHEDULE: User wants a schedule or day plan generated.
+- DAILY_CHECKIN: User reports today's energy/stress or responds to a check-in prompt.
 
 For CREATE_TASK, extract:
 - title (required): concise task name
@@ -166,11 +174,20 @@ For UPDATE_TASK, extract:
 For GENERATE_SCHEDULE, extract:
 - rawText: original user text
 
+For DAILY_CHECKIN, extract:
+- energyScore: integer 1-7 if mentioned or clearly inferable
+- stressScore: integer 1-7 if mentioned or clearly inferable
+- availableCapacityMinutes: optional integer minutes if mentioned
+- userNote: short summary or original text
+- checkinDate: YYYY-MM-DD if mentioned, otherwise today's date
+- adjustToday: true
+
 Rules:
 - Return an empty array [] if the message has no actionable intent (e.g. questions, greetings, casual chat).
 - Return an empty array [] for read-only questions like "what do I have to do Monday", "what is my highest priority task Monday", or "show my top task Friday". Do not turn those into GENERATE_SCHEDULE.
-- Set ambiguous: true if required fields for the action type are missing.
+- Set ambiguous: true if required fields for the action type are missing. DAILY_CHECKIN requires both energyScore and stressScore.
 - Set requiresConfirmation: true for UPDATE_TASK, GENERATE_SCHEDULE, and ambiguous actions.
+- Set requiresConfirmation: false for complete DAILY_CHECKIN actions.
 - Write a short, friendly assistantSummary confirming or clarifying the action.
 - Only extract actions that are clearly intended. Do not hallucinate tasks.`;
 
@@ -215,11 +232,12 @@ export async function parseGeminiMultimodal(
   const today = new Date().toISOString().slice(0, 10);
 
   const actionRules = `
-You support exactly 4 action types:
+You support exactly 5 action types:
 - CREATE_TASK: A task the user needs to do.
 - CREATE_EVENT: A fixed calendar event with a time.
 - UPDATE_TASK: Completing, moving, or modifying an existing task.
 - GENERATE_SCHEDULE: A request to generate a daily plan or schedule.
+- DAILY_CHECKIN: Today's energy/stress check-in from text or transcript.
 
 For CREATE_TASK, extract:
 - title (required): concise task name
@@ -245,10 +263,19 @@ For UPDATE_TASK, extract:
 For GENERATE_SCHEDULE, extract:
 - rawText: original user text
 
+For DAILY_CHECKIN, extract:
+- energyScore: integer 1-7 if mentioned or clearly inferable
+- stressScore: integer 1-7 if mentioned or clearly inferable
+- availableCapacityMinutes: optional integer minutes if mentioned
+- userNote: short summary or original text
+- checkinDate: YYYY-MM-DD if mentioned, otherwise today's date
+- adjustToday: true
+
 Rules:
 - Return an empty array [] if no actionable intent is found.
-- Set ambiguous: true if required fields are missing.
+- Set ambiguous: true if required fields are missing. DAILY_CHECKIN requires both energyScore and stressScore.
 - Set requiresConfirmation: true for UPDATE_TASK and ambiguous actions.
+- Set requiresConfirmation: false for complete DAILY_CHECKIN actions.
 - Write a short, friendly assistantSummary confirming or clarifying the action.
 - Only extract actions that are clearly intended. Do not hallucinate tasks.`;
 

@@ -1,5 +1,6 @@
 import { getCurrentUserId } from "@/lib/auth";
 import { getTodayDashboard, parseDashboardDate } from "@/lib/services/dashboard";
+import { DailyCheckinForm, type DailyCheckinFormState } from "@/app/_components/daily-checkin-form";
 import { TodayBlocksClient, type TodayBlockViewModel } from "@/app/_components/today-blocks-client";
 
 const defaultDemoDate = "2026-05-11";
@@ -76,6 +77,15 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
     status: block.status,
     schedulingReason: block.schedulingReason,
   }));
+  const checkinFormState: DailyCheckinFormState | null = dashboard.checkin
+    ? {
+        planningCycleId: dashboard.checkin.planningCycleId,
+        energyScore: dashboard.checkin.energyScore,
+        stressScore: dashboard.checkin.stressScore,
+        availableCapacityMinutes: dashboard.checkin.availableCapacityMinutes,
+        userNote: dashboard.checkin.userNote,
+      }
+    : null;
 
   return (
     <main className="min-h-screen bg-zinc-50 px-5 py-8 pb-28 font-sans text-zinc-950">
@@ -131,6 +141,7 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
             ) : (
               <p className="mt-3 text-sm text-zinc-500">No check-in has been submitted for this date.</p>
             )}
+            <DailyCheckinForm date={dashboard.date} initialCheckin={checkinFormState} />
           </article>
 
           <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
