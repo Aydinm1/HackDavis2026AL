@@ -8,6 +8,7 @@ type CalendarPageProps = {
   searchParams?: Promise<{
     gcal?: string;
     imported?: string;
+    calendars?: string;
     sync?: string;
     message?: string;
   }>;
@@ -97,6 +98,7 @@ export default async function Calendar({ searchParams }: CalendarPageProps) {
           googleCalendarStatus={{
             state: params?.gcal,
             imported: params?.imported,
+            calendars: params?.calendars,
             sync: params?.sync,
             message: params?.message,
           }}

@@ -76,7 +76,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Missing
 
-- [ ] Real Google Calendar OAuth and sync.
+- [x] Real Google Calendar OAuth and primary-calendar sync.
 - [x] `POST /api/schedule/generate`.
 - [x] `GET /api/insights/current`.
 - [x] `POST /api/insights/generate`.
@@ -240,6 +240,30 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [x] Imported events appear in calendar/dashboard/schedule APIs.
   - [x] Scheduler treats imported events as fixed busy blocks.
 
+### Multi-Calendar Support
+
+- [x] Discover all Google calendars for the connected account.
+- [x] Add endpoint:
+  - [x] `GET /api/calendar/google/calendars`
+- [x] Return calendar metadata:
+  - [x] `id`
+  - [x] `summary`
+  - [x] `description`
+  - [x] `primary`
+  - [x] `backgroundColor`
+  - [x] `selected`
+  - [x] `accessRole`
+- [x] Allow user to choose which calendars are imported.
+- [x] Store selected calendars per user:
+  - [x] support multiple `CalendarConnection` rows, one per Google `calendarId`
+  - [x] reuse the same encrypted Google token for selected calendars
+- [x] Add endpoint:
+  - [x] `PATCH /api/calendar/google/calendars`
+- [x] Sync all selected calendars by default.
+- [x] Keep `calendarId` on imported `CalendarEvent` rows so events from class/work/personal calendars can be shown together and filtered later.
+- [x] Calendar page should show a "Link calendars" / "Manage calendars" flow rather than only syncing `primary`.
+- [x] Scheduler should treat all selected imported calendars as fixed busy blocks.
+
 ## Priority 2: Voice And Image Setup Now
 
 ### API Contract Alignment
@@ -387,6 +411,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] `GET /api/calendar/google/connect`
 - [x] `GET /api/calendar/google/callback`
 - [x] `POST /api/calendar/google/sync`
+- [x] `GET /api/calendar/google/calendars`
+- [x] `PATCH /api/calendar/google/calendars`
 
 ## Demo Script Readiness
 
@@ -420,6 +446,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [ ] task difficulty validation/defaults
   - [ ] task breakdown generation for large tasks
   - [ ] Google Calendar event upsert
+  - [ ] Google Calendar multi-calendar discovery and selected-calendar sync
   - [ ] upload payload compatibility
   - [ ] Gemini parser fallback behavior
   - [ ] AiAction confirmation creates real rows
@@ -449,6 +476,4 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 2. [ ] Load existing chat thread history from APIs.
 3. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
 4. [ ] Finish voice/image Gemini flow and confirmation cards.
-5. [ ] Improve task breakdowns for large tasks.
-6. [ ] Add real Google Calendar OAuth/import.
-7. [ ] Add metrics queries for check-in, completion, and AI action success.
+5. [ ] Add metrics queries for check-in, completion, and AI action success.

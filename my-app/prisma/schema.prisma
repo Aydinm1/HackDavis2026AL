@@ -181,6 +181,12 @@ model CalendarConnection {
 
   provider   String @default("google")
   calendarId String @default("primary")
+  calendarSummary String?
+  calendarDescription String?
+  calendarBackgroundColor String?
+  accessRole String?
+  isPrimary Boolean @default(false)
+  isSelected Boolean @default(true)
 
   accessTokenEncrypted  String
   refreshTokenEncrypted String?

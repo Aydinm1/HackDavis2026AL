@@ -37,6 +37,21 @@ type GoogleEventsResponse = {
   nextPageToken?: string;
 };
 
+type GoogleCalendarListEntry = {
+  id: string;
+  summary?: string;
+  description?: string;
+  primary?: boolean;
+  backgroundColor?: string;
+  accessRole?: string;
+  selected?: boolean;
+};
+
+type GoogleCalendarListResponse = {
+  items?: GoogleCalendarListEntry[];
+  nextPageToken?: string;
+};
+
 function requiredEnv(name: string) {
   const value = process.env[name];
   if (!value) {
@@ -166,6 +181,16 @@ function tokenExpiresAt(tokens: GoogleTokenResponse) {
   return tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null;
 }
 
+function buildConnectionTokenData(tokens: GoogleTokenResponse) {
+  return {
+    accessTokenEncrypted: encryptToken(tokens.access_token),
+    refreshTokenEncrypted: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+    expiresAt: tokenExpiresAt(tokens),
+    scope: tokens.scope,
+    tokenType: tokens.token_type,
+  };
+}
+
 export async function handleGoogleCalendarCallback(params: { code: string; state: string }) {
   const userId = decodeState(params.state);
   if (!userId) {
@@ -177,6 +202,7 @@ export async function handleGoogleCalendarCallback(params: { code: string; state
     return { ok: false as const, error: "Google did not return an access token.", status: 400 };
   }
 
+  const tokenData = buildConnectionTokenData(tokens);
   const connection = await prisma.calendarConnection.upsert({
     where: {
       userId_provider_calendarId: {
@@ -186,34 +212,36 @@ export async function handleGoogleCalendarCallback(params: { code: string; state
       },
     },
     update: {
-      accessTokenEncrypted: encryptToken(tokens.access_token),
-      refreshTokenEncrypted: tokens.refresh_token ? encryptToken(tokens.refresh_token) : undefined,
-      expiresAt: tokenExpiresAt(tokens),
-      scope: tokens.scope,
-      tokenType: tokens.token_type,
+      accessTokenEncrypted: tokenData.accessTokenEncrypted,
+      refreshTokenEncrypted: tokenData.refreshTokenEncrypted ?? undefined,
+      expiresAt: tokenData.expiresAt,
+      scope: tokenData.scope,
+      tokenType: tokenData.tokenType,
+      calendarSummary: "Primary calendar",
+      isPrimary: true,
+      isSelected: true,
     },
     create: {
       userId,
       provider: "google",
       calendarId: "primary",
-      accessTokenEncrypted: encryptToken(tokens.access_token),
-      refreshTokenEncrypted: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
-      expiresAt: tokenExpiresAt(tokens),
-      scope: tokens.scope,
-      tokenType: tokens.token_type,
+      calendarSummary: "Primary calendar",
+      isPrimary: true,
+      isSelected: true,
+      ...tokenData,
     },
   });
 
   return { ok: true as const, value: { connectionId: connection.id, provider: connection.provider, calendarId: connection.calendarId } };
 }
 
-async function getUsableAccessToken(userId: string, calendarId: string) {
+async function getGooglePrimaryConnection(userId: string) {
   const connection = await prisma.calendarConnection.findUnique({
     where: {
       userId_provider_calendarId: {
         userId,
         provider: "google",
-        calendarId,
+        calendarId: "primary",
       },
     },
   });
@@ -222,6 +250,14 @@ async function getUsableAccessToken(userId: string, calendarId: string) {
     return { ok: false as const, error: "Google Calendar is not connected for this user.", status: 404 };
   }
 
+  return { ok: true as const, value: connection };
+}
+
+async function getUsableAccessToken(userId: string) {
+  const connectionResult = await getGooglePrimaryConnection(userId);
+  if (!connectionResult.ok) return connectionResult;
+
+  const connection = connectionResult.value;
   const expiresSoon = connection.expiresAt ? connection.expiresAt.getTime() <= Date.now() + 60_000 : false;
   if (!expiresSoon) {
     return { ok: true as const, value: decryptToken(connection.accessTokenEncrypted) };
@@ -243,6 +279,22 @@ async function getUsableAccessToken(userId: string, calendarId: string) {
   });
 
   return { ok: true as const, value: decryptToken(updated.accessTokenEncrypted) };
+}
+
+function copyConnectionTokenData(connection: {
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted: string | null;
+  expiresAt: Date | null;
+  scope: string | null;
+  tokenType: string | null;
+}) {
+  return {
+    accessTokenEncrypted: connection.accessTokenEncrypted,
+    refreshTokenEncrypted: connection.refreshTokenEncrypted,
+    expiresAt: connection.expiresAt,
+    scope: connection.scope,
+    tokenType: connection.tokenType,
+  };
 }
 
 function parseGoogleEventDate(value: GoogleCalendarEventDate | undefined, fallbackDate?: Date) {
@@ -293,6 +345,29 @@ async function fetchGoogleEvents(input: { accessToken: string; calendarId: strin
   return events;
 }
 
+async function fetchGoogleCalendars(accessToken: string) {
+  const calendars: GoogleCalendarListEntry[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({ minAccessRole: "reader" });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await fetch(`${GOOGLE_CALENDAR_API_URL}/users/me/calendarList?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const payload = (await response.json()) as GoogleCalendarListResponse & { error?: { message?: string } };
+    if (!response.ok) {
+      throw new Error(payload.error?.message ?? "Google Calendar list fetch failed.");
+    }
+
+    calendars.push(...(payload.items ?? []));
+    pageToken = payload.nextPageToken;
+  } while (pageToken);
+
+  return calendars;
+}
+
 function defaultSyncRange() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -301,25 +376,15 @@ function defaultSyncRange() {
   return { start, end };
 }
 
-export async function syncGoogleCalendarEvents(userId: string, input: { calendarId?: string; start?: Date; end?: Date } = {}) {
-  const calendarId = input.calendarId ?? "primary";
-  const range = input.start && input.end ? { start: input.start, end: input.end } : defaultSyncRange();
-
-  if (range.end <= range.start) {
-    return { ok: false as const, error: "end must be after start.", status: 400 };
-  }
-
-  const token = await getUsableAccessToken(userId, calendarId);
-  if (!token.ok) return token;
-
+async function syncSingleGoogleCalendar(input: { userId: string; accessToken: string; calendarId: string; start: Date; end: Date }) {
   const events = await fetchGoogleEvents({
-    accessToken: token.value,
-    calendarId,
-    start: range.start,
-    end: range.end,
+    accessToken: input.accessToken,
+    calendarId: input.calendarId,
+    start: input.start,
+    end: input.end,
   });
 
-  const syncedEvents = await Promise.all(
+  return Promise.all(
     events.map((event) => {
       const start = parseGoogleEventDate(event.start);
       const end = parseGoogleEventDate(event.end, start.date);
@@ -327,13 +392,13 @@ export async function syncGoogleCalendarEvents(userId: string, input: { calendar
       return prisma.calendarEvent.upsert({
         where: {
           userId_provider_externalEventId: {
-            userId,
+            userId: input.userId,
             provider: "google",
-            externalEventId: event.id,
+            externalEventId: `${input.calendarId}:${event.id}`,
           },
         },
         update: {
-          calendarId,
+          calendarId: input.calendarId,
           title: event.summary ?? "Untitled Google Calendar event",
           description: event.description,
           location: event.location,
@@ -345,10 +410,10 @@ export async function syncGoogleCalendarEvents(userId: string, input: { calendar
           rawProviderData: event as unknown as Prisma.InputJsonObject,
         },
         create: {
-          userId,
+          userId: input.userId,
           provider: "google",
-          externalEventId: event.id,
-          calendarId,
+          externalEventId: `${input.calendarId}:${event.id}`,
+          calendarId: input.calendarId,
           title: event.summary ?? "Untitled Google Calendar event",
           description: event.description,
           location: event.location,
@@ -362,11 +427,161 @@ export async function syncGoogleCalendarEvents(userId: string, input: { calendar
       });
     }),
   );
+}
+
+export async function listGoogleCalendars(userId: string) {
+  const [token, primaryConnection] = await Promise.all([
+    getUsableAccessToken(userId),
+    getGooglePrimaryConnection(userId),
+  ]);
+  if (!token.ok) return token;
+  if (!primaryConnection.ok) return primaryConnection;
+
+  const calendars = await fetchGoogleCalendars(token.value);
+  const existingConnections = await prisma.calendarConnection.findMany({
+    where: { userId, provider: "google" },
+  });
+  const existingByCalendarId = new Map(existingConnections.map((connection) => [connection.calendarId, connection]));
+  const tokenData = copyConnectionTokenData(primaryConnection.value);
+
+  const savedCalendars = await Promise.all(
+    calendars.map((calendar) => {
+      const existing = existingByCalendarId.get(calendar.id);
+      const isPrimary = Boolean(calendar.primary || calendar.id === "primary");
+      return prisma.calendarConnection.upsert({
+        where: {
+          userId_provider_calendarId: {
+            userId,
+            provider: "google",
+            calendarId: calendar.id,
+          },
+        },
+        update: {
+          calendarSummary: calendar.summary,
+          calendarDescription: calendar.description,
+          calendarBackgroundColor: calendar.backgroundColor,
+          accessRole: calendar.accessRole,
+          isPrimary,
+          isSelected: existing?.isSelected ?? isPrimary,
+          ...tokenData,
+        },
+        create: {
+          userId,
+          provider: "google",
+          calendarId: calendar.id,
+          calendarSummary: calendar.summary,
+          calendarDescription: calendar.description,
+          calendarBackgroundColor: calendar.backgroundColor,
+          accessRole: calendar.accessRole,
+          isPrimary,
+          isSelected: isPrimary || Boolean(calendar.selected),
+          ...tokenData,
+        },
+      });
+    }),
+  );
+
+  return {
+    ok: true as const,
+    value: savedCalendars.map((calendar) => ({
+      id: calendar.calendarId,
+      summary: calendar.calendarSummary,
+      description: calendar.calendarDescription,
+      primary: calendar.isPrimary,
+      backgroundColor: calendar.calendarBackgroundColor,
+      selected: calendar.isSelected,
+      accessRole: calendar.accessRole,
+    })),
+  };
+}
+
+export async function updateSelectedGoogleCalendars(userId: string, calendarIds: string[]) {
+  const primaryConnection = await getGooglePrimaryConnection(userId);
+  if (!primaryConnection.ok) return primaryConnection;
+
+  const uniqueCalendarIds = [...new Set(calendarIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueCalendarIds.length === 0) {
+    return { ok: false as const, error: "At least one calendarId must be selected.", status: 400 };
+  }
+
+  const connections = await prisma.calendarConnection.findMany({
+    where: { userId, provider: "google" },
+  });
+  const knownCalendarIds = new Set(connections.map((connection) => connection.calendarId));
+  const unknownCalendarIds = uniqueCalendarIds.filter((calendarId) => !knownCalendarIds.has(calendarId));
+  if (unknownCalendarIds.length > 0) {
+    return { ok: false as const, error: `Unknown calendarId(s): ${unknownCalendarIds.join(", ")}. Refresh calendars first.`, status: 400 };
+  }
+
+  await prisma.calendarConnection.updateMany({
+    where: { userId, provider: "google" },
+    data: { isSelected: false },
+  });
+  await prisma.calendarConnection.updateMany({
+    where: { userId, provider: "google", calendarId: { in: uniqueCalendarIds } },
+    data: { isSelected: true },
+  });
+
+  const updated = await prisma.calendarConnection.findMany({
+    where: { userId, provider: "google" },
+    orderBy: [{ isPrimary: "desc" }, { calendarSummary: "asc" }, { calendarId: "asc" }],
+  });
+
+  return {
+    ok: true as const,
+    value: updated.map((calendar) => ({
+      id: calendar.calendarId,
+      summary: calendar.calendarSummary,
+      description: calendar.calendarDescription,
+      primary: calendar.isPrimary,
+      backgroundColor: calendar.calendarBackgroundColor,
+      selected: calendar.isSelected,
+      accessRole: calendar.accessRole,
+    })),
+  };
+}
+
+export async function syncGoogleCalendarEvents(userId: string, input: { calendarId?: string; start?: Date; end?: Date } = {}) {
+  const range = input.start && input.end ? { start: input.start, end: input.end } : defaultSyncRange();
+
+  if (range.end <= range.start) {
+    return { ok: false as const, error: "end must be after start.", status: 400 };
+  }
+
+  const token = await getUsableAccessToken(userId);
+  if (!token.ok) return token;
+
+  const selectedConnections = input.calendarId
+    ? [{ calendarId: input.calendarId }]
+    : await prisma.calendarConnection.findMany({
+        where: { userId, provider: "google", isSelected: true },
+        select: { calendarId: true },
+        orderBy: [{ isPrimary: "desc" }, { calendarSummary: "asc" }, { calendarId: "asc" }],
+      });
+
+  const calendarsToSync = selectedConnections.length > 0 ? selectedConnections : [{ calendarId: "primary" }];
+  const syncResults = await Promise.all(
+    calendarsToSync.map(async ({ calendarId }) => ({
+      calendarId,
+      events: await syncSingleGoogleCalendar({
+        userId,
+        accessToken: token.value,
+        calendarId,
+        start: range.start,
+        end: range.end,
+      }),
+    })),
+  );
+  const syncedEvents = syncResults.flatMap((result) => result.events);
 
   return {
     ok: true as const,
     value: {
-      calendarId,
+      calendarId: input.calendarId ?? null,
+      syncedCalendars: syncResults.map((result) => ({
+        calendarId: result.calendarId,
+        importedCount: result.events.length,
+      })),
       range,
       importedCount: syncedEvents.length,
       events: syncedEvents,
@@ -377,6 +592,8 @@ export async function syncGoogleCalendarEvents(userId: string, input: { calendar
 const googleCalendar = {
   buildGoogleCalendarAuthUrl,
   handleGoogleCalendarCallback,
+  listGoogleCalendars,
+  updateSelectedGoogleCalendars,
   syncGoogleCalendarEvents,
 };
 

@@ -31,6 +31,14 @@ export async function GET(request: Request) {
       return Response.redirect(redirectUrl);
     }
 
+    const calendars = await googleCalendar.listGoogleCalendars(getCurrentUserId());
+    if (!calendars.ok) {
+      redirectUrl.searchParams.set("gcal", "connected");
+      redirectUrl.searchParams.set("sync", "error");
+      redirectUrl.searchParams.set("message", calendars.error);
+      return Response.redirect(redirectUrl);
+    }
+
     const sync = await googleCalendar.syncGoogleCalendarEvents(getCurrentUserId());
     if (!sync.ok) {
       redirectUrl.searchParams.set("gcal", "connected");
@@ -41,6 +49,7 @@ export async function GET(request: Request) {
 
     redirectUrl.searchParams.set("gcal", "connected");
     redirectUrl.searchParams.set("imported", String(sync.value.importedCount));
+    redirectUrl.searchParams.set("calendars", String(calendars.value.length));
     return Response.redirect(redirectUrl);
   } catch (caught) {
     console.error(caught);

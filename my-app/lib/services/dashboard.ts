@@ -12,6 +12,25 @@ type DashboardDateRange = {
 
 const incompleteTaskStatuses = ["todo", "scheduled", "in_progress", "deferred"];
 
+type DashboardCheckinLog = {
+  id: string;
+  loggedAt: Date;
+  energyScore: number;
+  stressScore: number;
+  availableCapacityMinutes: number | null;
+  userNote: string | null;
+  source: string;
+};
+
+type CheckinLogDelegate = {
+  findFirst(args: unknown): Promise<DashboardCheckinLog | null>;
+  findMany(args: unknown): Promise<DashboardCheckinLog[]>;
+};
+
+function getCheckinLogDelegate() {
+  return (prisma as unknown as { checkinLog?: CheckinLogDelegate }).checkinLog;
+}
+
 export function parseDashboardDate(searchParams: URLSearchParams): ValidationResult<DashboardDateRange> {
   const date = searchParams.get("date");
 
@@ -47,6 +66,7 @@ export function parseDashboardDate(searchParams: URLSearchParams): ValidationRes
 export async function getTodayDashboard(userId: string, range: DashboardDateRange) {
   const now = new Date();
   const eventAnchor = now > range.start && now < range.end ? now : range.start;
+  const checkinLogDelegate = getCheckinLogDelegate();
 
   const [checkin, latestCheckinLog, todayCheckinLogs, nextCalendarEvent, todayBlocks, topTasks, insights] = await Promise.all([
     prisma.dailyCheckin.findUnique({
@@ -60,26 +80,30 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
         aiInsights: true,
       },
     }),
-    prisma.checkinLog.findFirst({
-      where: {
-        userId,
-        loggedAt: {
-          gte: range.start,
-          lt: range.end,
-        },
-      },
-      orderBy: { loggedAt: "desc" },
-    }),
-    prisma.checkinLog.findMany({
-      where: {
-        userId,
-        loggedAt: {
-          gte: range.start,
-          lt: range.end,
-        },
-      },
-      orderBy: { loggedAt: "asc" },
-    }),
+    checkinLogDelegate
+      ? checkinLogDelegate.findFirst({
+          where: {
+            userId,
+            loggedAt: {
+              gte: range.start,
+              lt: range.end,
+            },
+          },
+          orderBy: { loggedAt: "desc" },
+        })
+      : Promise.resolve(null),
+    checkinLogDelegate
+      ? checkinLogDelegate.findMany({
+          where: {
+            userId,
+            loggedAt: {
+              gte: range.start,
+              lt: range.end,
+            },
+          },
+          orderBy: { loggedAt: "asc" },
+        })
+      : Promise.resolve([]),
     prisma.calendarEvent.findFirst({
       where: {
         userId,

@@ -313,7 +313,7 @@ GOOGLE_CALENDAR_SCOPES=https://www.googleapis.com/auth/calendar.readonly
 GOOGLE_TOKEN_ENCRYPTION_KEY=
 ```
 
-Tokens are encrypted before being stored in `CalendarConnection`. Imported Google events are stored in `CalendarEvent` with `provider = "google"` and `source = "google_import"`, so the existing schedule/dashboard/calendar APIs treat them as fixed busy blocks.
+Tokens are encrypted before being stored in `CalendarConnection`. The primary connection stores the OAuth token, and selected calendar rows store calendar metadata and selection state. Imported Google events are stored in `CalendarEvent` with `provider = "google"` and `source = "google_import"`, so the existing schedule/dashboard/calendar APIs treat them as fixed busy blocks.
 
 ### GET `/api/calendar/google/connect`
 
@@ -346,6 +346,8 @@ Behavior:
 - Exchanges the Google code for tokens.
 - Upserts a `CalendarConnection` for `provider = "google"` and `calendarId = "primary"`.
 
+The browser callback alias at `/auth/google/callback` also discovers calendars, syncs selected calendars, and redirects back to `/calendar`.
+
 Response:
 
 ```json
@@ -356,6 +358,42 @@ Response:
     "calendarId": "primary",
     "message": "Google Calendar connected. Call POST /api/calendar/google/sync to import events."
   }
+}
+```
+
+### GET `/api/calendar/google/calendars`
+
+Discovers Google calendars for the connected account and stores metadata in `CalendarConnection`.
+
+Response:
+
+```json
+{
+  "data": {
+    "calendars": [
+      {
+        "id": "primary",
+        "summary": "School",
+        "description": null,
+        "primary": true,
+        "backgroundColor": "#4285f4",
+        "selected": true,
+        "accessRole": "owner"
+      }
+    ]
+  }
+}
+```
+
+### PATCH `/api/calendar/google/calendars`
+
+Updates which Google calendars should be imported and treated as busy blocks.
+
+Accepted body:
+
+```json
+{
+  "calendarIds": ["primary", "class-calendar-id"]
 }
 ```
 
@@ -375,19 +413,26 @@ Optional body:
 
 Behavior:
 
-- Defaults to `calendarId = "primary"`.
+- If `calendarId` is provided, syncs only that calendar.
+- Otherwise syncs all selected Google calendars.
 - Defaults sync range to today through 30 days from now.
 - Refreshes the Google access token when needed.
 - Imports timed and all-day events.
 - Imports cancelled Google events as `status = "cancelled"`.
-- Upserts by `[userId, provider, externalEventId]`.
+- Upserts by `[userId, provider, externalEventId]`, where Google event IDs are namespaced by calendar ID to avoid collisions across calendars.
 
 Response:
 
 ```json
 {
   "data": {
-    "calendarId": "primary",
+    "calendarId": null,
+    "syncedCalendars": [
+      {
+        "calendarId": "primary",
+        "importedCount": 8
+      }
+    ],
     "importedCount": 12,
     "range": {
       "start": "2026-05-11T07:00:00.000Z",

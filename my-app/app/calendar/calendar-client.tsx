@@ -52,8 +52,19 @@ type SyncedCalendarEvent = {
 type GoogleCalendarStatus = {
   state?: string;
   imported?: string;
+  calendars?: string;
   sync?: string;
   message?: string;
+};
+
+type GoogleCalendarOption = {
+  id: string;
+  summary: string | null;
+  description: string | null;
+  primary: boolean;
+  backgroundColor: string | null;
+  selected: boolean;
+  accessRole: string | null;
 };
 
 function formatTime(date: string) {
@@ -126,6 +137,10 @@ export function CalendarClient({
   const [busyBlockId, setBusyBlockId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
+  const [isLoadingCalendars, setIsLoadingCalendars] = useState(false);
+  const [isSavingCalendars, setIsSavingCalendars] = useState(false);
+  const [showCalendarManager, setShowCalendarManager] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarOption[]>([]);
   const [unscheduledTasks, setUnscheduledTasks] = useState<UnscheduledTask[]>([]);
   const [rescheduleSuggestion, setRescheduleSuggestion] = useState<{
     title: string;
@@ -230,6 +245,53 @@ export function CalendarClient({
     }
   }
 
+  async function loadGoogleCalendars() {
+    setError(null);
+    setIsLoadingCalendars(true);
+    setShowCalendarManager(true);
+
+    try {
+      const response = await fetch("/api/calendar/google/calendars");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to load Google calendars.");
+      setGoogleCalendars((body.data?.calendars ?? []) as GoogleCalendarOption[]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to load Google calendars.");
+    } finally {
+      setIsLoadingCalendars(false);
+    }
+  }
+
+  function toggleGoogleCalendar(calendarId: string) {
+    setGoogleCalendars((current) =>
+      current.map((calendar) =>
+        calendar.id === calendarId ? { ...calendar, selected: !calendar.selected } : calendar,
+      ),
+    );
+  }
+
+  async function saveGoogleCalendarSelection() {
+    setError(null);
+    setIsSavingCalendars(true);
+
+    try {
+      const selectedIds = googleCalendars.filter((calendar) => calendar.selected).map((calendar) => calendar.id);
+      const response = await fetch("/api/calendar/google/calendars", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calendarIds: selectedIds }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to save selected calendars.");
+      setGoogleCalendars((body.data?.calendars ?? []) as GoogleCalendarOption[]);
+      await syncGoogleCalendar();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to save selected calendars.");
+    } finally {
+      setIsSavingCalendars(false);
+    }
+  }
+
   async function completeBlock(item: CalendarItemViewModel) {
     setError(null);
     setRescheduleSuggestion(null);
@@ -300,11 +362,19 @@ export function CalendarClient({
           </a>
           <button
             type="button"
+            onClick={loadGoogleCalendars}
+            disabled={isLoadingCalendars}
+            className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-400"
+          >
+            {isLoadingCalendars ? "Loading..." : "Manage calendars"}
+          </button>
+          <button
+            type="button"
             onClick={syncGoogleCalendar}
             disabled={isSyncingGoogle}
             className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-400"
           >
-            {isSyncingGoogle ? "Syncing..." : "Sync Google"}
+            {isSyncingGoogle ? "Syncing..." : "Sync selected"}
           </button>
           <button
             type="button"
@@ -321,9 +391,63 @@ export function CalendarClient({
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
           Google Calendar connected
           {googleCalendarStatus.imported ? ` and imported ${googleCalendarStatus.imported} events.` : "."}
+          {googleCalendarStatus.calendars ? ` Found ${googleCalendarStatus.calendars} calendars.` : null}
           {googleCalendarStatus.sync === "error" && googleCalendarStatus.message
             ? ` Sync needs attention: ${googleCalendarStatus.message}`
             : null}
+        </div>
+      )}
+
+      {showCalendarManager && (
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-zinc-950">Google calendars</h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                Select the calendars that should block time in this planner.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={saveGoogleCalendarSelection}
+              disabled={isSavingCalendars || googleCalendars.length === 0}
+              className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+            >
+              {isSavingCalendars ? "Saving..." : "Save & sync"}
+            </button>
+          </div>
+          <div className="mt-4 grid gap-2">
+            {googleCalendars.length === 0 && (
+              <p className="text-sm text-zinc-500">
+                {isLoadingCalendars ? "Loading calendars..." : "No Google calendars loaded yet."}
+              </p>
+            )}
+            {googleCalendars.map((calendar) => (
+              <label
+                key={calendar.id}
+                className="flex items-start gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={calendar.selected}
+                  onChange={() => toggleGoogleCalendar(calendar.id)}
+                  className="mt-1"
+                />
+                <span
+                  className="mt-1 h-3 w-3 shrink-0 rounded-full border border-white shadow-sm"
+                  style={{ backgroundColor: calendar.backgroundColor ?? "#2563eb" }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0">
+                  <span className="block font-medium text-zinc-950">
+                    {calendar.summary ?? calendar.id}
+                    {calendar.primary ? " (primary)" : ""}
+                  </span>
+                  <span className="block truncate text-xs text-zinc-500">{calendar.id}</span>
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
 
