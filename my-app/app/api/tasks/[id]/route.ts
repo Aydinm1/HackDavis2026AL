@@ -1,5 +1,5 @@
 import { getCurrentUserId } from "@/lib/auth";
-import { hardDeleteTask, updateTask, validatePatchTaskBody } from "@/lib/services/tasks";
+import { cancelTask, updateTask, validatePatchTaskBody } from "@/lib/services/tasks";
 
 export const runtime = "nodejs";
 
@@ -31,7 +31,7 @@ export async function PATCH(request: Request, context: TaskRouteContext) {
 export async function DELETE(_request: Request, context: TaskRouteContext) {
   try {
     const { id } = await context.params;
-    const result = await hardDeleteTask(getCurrentUserId(), id);
+    const result = await cancelTask(getCurrentUserId(), id);
 
     if (!result.ok) {
       return Response.json({ error: result.error }, { status: result.status });

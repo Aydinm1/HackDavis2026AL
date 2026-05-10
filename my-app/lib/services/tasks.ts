@@ -440,21 +440,6 @@ export async function cancelTask(userId: string, taskId: string) {
   return updateTask(userId, taskId, { status: "cancelled" });
 }
 
-export async function hardDeleteTask(userId: string, taskId: string) {
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, userId },
-    select: { id: true },
-  });
-
-  if (!task) {
-    return { ok: false as const, error: "Task not found.", status: 404 };
-  }
-
-  await prisma.task.delete({ where: { id: taskId } });
-
-  return { ok: true as const, value: { id: taskId } };
-}
-
 export async function completeTask(
   userId: string,
   taskId: string,

@@ -32,6 +32,10 @@ export default function RootLayout({
         {children}
         <Navbar />
       </body>
+      <body className="pb-16">
+        {children}
+        <Navbar />
+      </body>
     </html>
   );
 }

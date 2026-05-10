@@ -26,6 +26,9 @@ let validateCheckinLogBody: typeof CheckinsService.validateCheckinLogBody;
 let buildTodayScheduleAdjustmentSuggestions: typeof CheckinsService.buildTodayScheduleAdjustmentSuggestions;
 let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let resolveNextWeekdayDate: typeof ChatService.resolveNextWeekdayDate;
+let getMissingCreateTaskPlanningFields: typeof ChatService.getMissingCreateTaskPlanningFields;
+let mergePendingCreateTaskPayload: typeof ChatService.mergePendingCreateTaskPayload;
+let buildFollowUpTaskUpdatePayload: typeof ChatService.buildFollowUpTaskUpdatePayload;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
@@ -62,6 +65,9 @@ before(async () => {
   buildTodayScheduleAdjustmentSuggestions = checkinsService.buildTodayScheduleAdjustmentSuggestions;
   validateChatMessageBody = chatService.validateChatMessageBody;
   resolveNextWeekdayDate = chatService.resolveNextWeekdayDate;
+  getMissingCreateTaskPlanningFields = chatService.getMissingCreateTaskPlanningFields;
+  mergePendingCreateTaskPayload = chatService.mergePendingCreateTaskPayload;
+  buildFollowUpTaskUpdatePayload = chatService.buildFollowUpTaskUpdatePayload;
   parseDashboardDate = dashboardService.parseDashboardDate;
   parseMockChatMessage = mockParser.parseMockChatMessage;
   validateGeminiResponse = geminiParser.validateGeminiResponse;
@@ -594,6 +600,84 @@ test("mock parser does not turn read-only task questions into schedule actions",
   assert.deepEqual(actions, []);
 });
 
+test("pending chat task creation merges difficulty and priority without requiring an estimate", () => {
+  const pendingPayload = {
+    title: "CS homework",
+    dueAt: "2026-05-10T14:00:00",
+    priority: 1,
+    cognitiveLoad: 7,
+    type: "school",
+    workType: "study",
+    timeframe: "daily",
+    ambiguous: true,
+  };
+
+  const merged = mergePendingCreateTaskPayload(pendingPayload, "difficulty 7 priority 3");
+
+  assert.ok(merged);
+  assert.equal(merged.payload.priority, 3);
+  assert.equal(merged.payload.cognitiveLoad, 7);
+  assert.equal(merged.payload.ambiguous, false);
+  assert.deepEqual(merged.missingFields, []);
+  assert.match(merged.assistantMessage, /review and confirm/i);
+});
+
+test("pending chat task creation becomes confirmable when all planning fields are present", () => {
+  const pendingPayload = {
+    title: "CS homework",
+    dueAt: "2026-05-10T14:00:00",
+    priority: 1,
+    cognitiveLoad: 7,
+    type: "school",
+    workType: "study",
+    timeframe: "daily",
+    ambiguous: true,
+  };
+
+  const merged = mergePendingCreateTaskPayload(pendingPayload, "difficulty 7 priority 3 90 minutes");
+
+  assert.ok(merged);
+  assert.equal(merged.payload.priority, 3);
+  assert.equal(merged.payload.cognitiveLoad, 7);
+  assert.equal(merged.payload.estimatedMinutes, 90);
+  assert.equal(merged.payload.ambiguous, false);
+  assert.deepEqual(merged.missingFields, []);
+  assert.match(merged.assistantMessage, /review and confirm/i);
+});
+
+test("chat create task planning validation requires title and difficulty but not time", () => {
+  assert.deepEqual(
+    getMissingCreateTaskPlanningFields({
+      title: "CS homework",
+      cognitiveLoad: 7,
+    }),
+    [],
+  );
+
+  assert.deepEqual(
+    getMissingCreateTaskPlanningFields({
+      title: "CS homework",
+      estimatedMinutes: 90,
+    }),
+    ["difficulty"],
+  );
+});
+
+test("chat follow-up update targets the latest saved task instead of pending creation", () => {
+  const payload = buildFollowUpTaskUpdatePayload(
+    { id: "task_cs_homework", title: "Computer Science Homework" },
+    "Can we actually change it to be priority 3 and difficulty 7",
+  );
+
+  assert.ok(payload);
+  assert.equal(payload.taskId, "task_cs_homework");
+  assert.equal(payload.title, "Computer Science Homework");
+  assert.equal(payload.operation, "update_fields");
+  assert.equal(payload.priority, 3);
+  assert.equal(payload.cognitiveLoad, 7);
+  assert.equal(payload.ambiguous, false);
+});
+
 test("mock parser creates task and event actions from simple text", () => {
   const taskActions = parseMockChatMessage("add chemistry review task due 2026-05-14 high priority");
   const eventActions = parseMockChatMessage("dentist appointment 2026-05-12 at 2pm");
@@ -708,9 +792,9 @@ test("voice upload validation requires audioData and mimeType", () => {
 });
 
 test("image upload validation requires imageData and mimeType", () => {
-  const valid = validateImageUploadBody({ imageData: "base64string==", mimeType: "image/jpeg" });
-  const missingImage = validateImageUploadBody({ mimeType: "image/jpeg" });
-  const missingMime = validateImageUploadBody({ imageData: "base64string==" });
+  const valid = validateImageUploadBody({ images: [{ imageData: "base64string==", mimeType: "image/jpeg" }] });
+  const missingImage = validateImageUploadBody({ images: [{ mimeType: "image/jpeg" }] });
+  const missingMime = validateImageUploadBody({ images: [{ imageData: "base64string==" }] });
   const empty = validateImageUploadBody({});
 
   assert.equal(valid.ok, true);
