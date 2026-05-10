@@ -60,7 +60,7 @@ export default function WeeklyAiInsights({
             <SparkleIcon />
             <h3 className="text-[28px] leading-none text-white">Float&apos;s Overview</h3>
           </div>
-          <p className="mt-8 line-clamp-4 font-[var(--font-jakarta)] text-[15px] font-light leading-[1.28] text-white/82">
+          <p className="mt-4 line-clamp-4 font-[var(--font-jakarta)] text-[15px] font-light leading-[1.28] text-white/82">
             {overviewText}
           </p>
         </article>

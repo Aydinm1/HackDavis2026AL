@@ -160,7 +160,7 @@ export function DailyOnboardingCheckin({
                 highLabel="high energy"
                 value={energyScore}
                 onChange={setEnergyScore}
-                gradientClassName="bg-gradient-to-r from-rose-400/60 via-orange-400/60 to-fuchsia-400/60"
+                gradientClassName="[background:linear-gradient(to_right,rgba(248,113,113,0.6),rgba(251,146,60,0.6),rgba(250,204,21,0.6),rgba(74,222,128,0.6),rgba(96,165,250,0.6),rgba(129,140,248,0.6),rgba(192,132,252,0.6))]"
               />
             </div>
           </div>

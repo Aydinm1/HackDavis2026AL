@@ -15,7 +15,7 @@ interface PastEnergyHistoryProps {
   month: HistoryEntry[];
 }
 
-const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 
 function dayOfMonth(date: string) {
   return new Date(`${date}T12:00:00`).getDate();
@@ -38,10 +38,10 @@ function monthDayLabel(date: string) {
 export default function PastEnergyHistory({ history, month }: PastEnergyHistoryProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const monthEntries = month.length > 0 ? month : history;
-  const firstDayOffset = new Date(`${monthEntries[0]?.date ?? history[0]?.date}T12:00:00`).getDay();
+  const firstDayOffset = (new Date(`${monthEntries[0]?.date ?? history[0]?.date}T12:00:00`).getDay() + 6) % 7;
 
   return (
-    <div className="mt-8 w-full rounded-lg border border-white/10 bg-[#1B1B1B]/82 px-[26px] pb-5 pt-7 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_14px_30px_rgba(0,0,0,0.26)] backdrop-blur-md">
+    <div className="mt-5 w-full rounded-lg border border-white/10 bg-[#1B1B1B]/82 px-[26px] pb-5 pt-3 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_14px_30px_rgba(0,0,0,0.26)] backdrop-blur-md">
       <div className="flex items-center justify-between">
         <h2 className="text-[38px] leading-none text-white">your past energy</h2>
         <button
@@ -52,35 +52,33 @@ export default function PastEnergyHistory({ history, month }: PastEnergyHistoryP
           className="flex h-10 w-10 items-center justify-center text-white/90 transition-opacity hover:opacity-70"
         >
           <span
-            className={`block h-3.5 w-3.5 border-b-2 border-r-2 border-current transition-transform ${
-              isExpanded ? "-rotate-[135deg]" : "rotate-45"
-            }`}
+            className="block h-3.5 w-3.5 rotate-45 border-b-2 border-r-2 border-current"
           />
         </button>
       </div>
 
       {isExpanded ? (
-        <div className="mt-8">
+        <div className="mt-3">
           <div className="flex items-center justify-between font-[var(--font-jakarta)] text-white/75">
-            <button type="button" className="flex items-center gap-2 text-[23px] font-light">
+            <button type="button" className="flex items-center gap-1.5 text-[15px] font-light">
               {monthLabel(monthEntries[0]?.date ?? history[0]?.date)}
-              <span className="block h-3 w-3 rotate-45 border-r-2 border-t-2 border-white/75" />
+            <span className="block h-2 w-2 rotate-45 border-r border-t border-white/75" />
             </button>
-            <div className="flex gap-8">
-              <button type="button" aria-label="Previous month" className="h-8 w-8">
-                <span className="mx-auto block h-4 w-4 -rotate-[135deg] border-r-2 border-t-2 border-white/85" />
+            <div className="flex gap-4">
+              <button type="button" aria-label="Previous month" className="h-6 w-6">
+                <span className="mx-auto block h-2.5 w-2.5 -rotate-[135deg] border-r border-t border-white/85" />
               </button>
-              <button type="button" aria-label="Next month" className="h-8 w-8">
-                <span className="mx-auto block h-4 w-4 rotate-45 border-r-2 border-t-2 border-white/85" />
+              <button type="button" aria-label="Next month" className="h-6 w-6">
+                <span className="mx-auto block h-2.5 w-2.5 rotate-45 border-r border-t border-white/85" />
               </button>
             </div>
           </div>
 
-          <div className="mt-14 grid grid-cols-7 gap-x-3 gap-y-8">
+          <div className="mt-8 grid grid-cols-7 gap-5">
             {DAYS.map((day) => (
               <span
                 key={day}
-                className="text-center font-[var(--font-jakarta)] text-[21px] font-light leading-none text-white/70"
+                className="font-[var(--font-jakarta)] leading-none text-white/70"
               >
                 {day}
               </span>
@@ -104,9 +102,9 @@ export default function PastEnergyHistory({ history, month }: PastEnergyHistoryP
           </div>
         </div>
       ) : (
-        <div className="mt-8 grid grid-cols-7 gap-3">
+        <div className="mt-3 grid grid-cols-7 gap-5">
           {history.map((entry) => {
-            const dayOfWeek = new Date(`${entry.date}T12:00:00`).getDay();
+            const dayOfWeek = (new Date(`${entry.date}T12:00:00`).getDay() + 6) % 7;
             return (
               <div key={entry.date} className="flex min-w-0 flex-col items-center">
                 <span className="font-[var(--font-jakarta)] text-[15px] font-light leading-none text-white/70">
