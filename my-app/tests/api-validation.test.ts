@@ -1,0 +1,1169 @@
+import assert from "node:assert/strict";
+import test, { before } from "node:test";
+import type * as CalendarEventsService from "@/lib/services/calendarEvents";
+import type * as AiCorrectionsService from "@/lib/services/aiCorrections";
+import type * as CheckinsService from "@/lib/services/checkins";
+import type * as ChatService from "@/lib/services/chat";
+import type * as DashboardService from "@/lib/services/dashboard";
+import type * as MockParser from "@/lib/ai/mockParser";
+import type * as GeminiParser from "@/lib/ai/geminiParser";
+import type * as InsightsService from "@/lib/services/insights";
+import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
+import type * as TasksService from "@/lib/services/tasks";
+import type * as UploadsService from "@/lib/services/uploads";
+
+process.env.DATABASE_URL ??= "postgresql://user:password@localhost:5432/testdb?schema=public";
+
+let validateCompleteTaskBody: typeof TasksService.validateCompleteTaskBody;
+let validateCreateTaskBody: typeof TasksService.validateCreateTaskBody;
+let validatePatchTaskBody: typeof TasksService.validatePatchTaskBody;
+let validateTaskBreakdownBody: typeof TasksService.validateTaskBreakdownBody;
+let buildBreakdownSteps: typeof TasksService.buildBreakdownSteps;
+let validateAiCorrectionQuery: typeof AiCorrectionsService.validateAiCorrectionQuery;
+let buildAiCorrectionEvalCase: typeof AiCorrectionsService.buildAiCorrectionEvalCase;
+let hasPayloadCorrection: typeof AiCorrectionsService.hasPayloadCorrection;
+let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
+let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
+let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
+let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
+let validateCheckinLogBody: typeof CheckinsService.validateCheckinLogBody;
+let buildTodayScheduleAdjustmentSuggestions: typeof CheckinsService.buildTodayScheduleAdjustmentSuggestions;
+let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
+let resolveNextWeekdayDate: typeof ChatService.resolveNextWeekdayDate;
+let getMissingCreateTaskPlanningFields: typeof ChatService.getMissingCreateTaskPlanningFields;
+let mergePendingCreateTaskPayload: typeof ChatService.mergePendingCreateTaskPayload;
+let buildFollowUpTaskUpdatePayload: typeof ChatService.buildFollowUpTaskUpdatePayload;
+let parseDashboardDate: typeof DashboardService.parseDashboardDate;
+let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
+let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
+let validateCurrentInsightsQuery: typeof InsightsService.validateCurrentInsightsQuery;
+let validateGenerateInsightBody: typeof InsightsService.validateGenerateInsightBody;
+let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
+let validateGenerateScheduleBody: typeof ScheduledBlocksService.validateGenerateScheduleBody;
+let findFirstAvailableSlot: typeof ScheduledBlocksService.findFirstAvailableSlot;
+let validateVoiceUploadBody: typeof UploadsService.validateVoiceUploadBody;
+let validateImageUploadBody: typeof UploadsService.validateImageUploadBody;
+
+before(async () => {
+  const tasksService = await import("@/lib/services/tasks");
+  const aiCorrectionsService = await import("@/lib/services/aiCorrections");
+  const calendarEventsService = await import("@/lib/services/calendarEvents");
+  const checkinsService = await import("@/lib/services/checkins");
+  const chatService = await import("@/lib/services/chat");
+  const dashboardService = await import("@/lib/services/dashboard");
+  const mockParser = await import("@/lib/ai/mockParser");
+  const geminiParser = await import("@/lib/ai/geminiParser");
+  const insightsService = await import("@/lib/services/insights");
+  const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
+  const uploadsService = await import("@/lib/services/uploads");
+
+  validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
+  validateCreateTaskBody = tasksService.validateCreateTaskBody;
+  validatePatchTaskBody = tasksService.validatePatchTaskBody;
+  validateTaskBreakdownBody = tasksService.validateTaskBreakdownBody;
+  buildBreakdownSteps = tasksService.buildBreakdownSteps;
+  validateAiCorrectionQuery = aiCorrectionsService.validateAiCorrectionQuery;
+  buildAiCorrectionEvalCase = aiCorrectionsService.buildAiCorrectionEvalCase;
+  hasPayloadCorrection = aiCorrectionsService.hasPayloadCorrection;
+  validateCalendarRange = calendarEventsService.validateCalendarRange;
+  validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
+  validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
+  validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
+  validateCheckinLogBody = checkinsService.validateCheckinLogBody;
+  buildTodayScheduleAdjustmentSuggestions = checkinsService.buildTodayScheduleAdjustmentSuggestions;
+  validateChatMessageBody = chatService.validateChatMessageBody;
+  resolveNextWeekdayDate = chatService.resolveNextWeekdayDate;
+  getMissingCreateTaskPlanningFields = chatService.getMissingCreateTaskPlanningFields;
+  mergePendingCreateTaskPayload = chatService.mergePendingCreateTaskPayload;
+  buildFollowUpTaskUpdatePayload = chatService.buildFollowUpTaskUpdatePayload;
+  parseDashboardDate = dashboardService.parseDashboardDate;
+  parseMockChatMessage = mockParser.parseMockChatMessage;
+  validateGeminiResponse = geminiParser.validateGeminiResponse;
+  validateCurrentInsightsQuery = insightsService.validateCurrentInsightsQuery;
+  validateGenerateInsightBody = insightsService.validateGenerateInsightBody;
+  validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
+  validateGenerateScheduleBody = scheduledBlocksService.validateGenerateScheduleBody;
+  findFirstAvailableSlot = scheduledBlocksService.findFirstAvailableSlot;
+  validateVoiceUploadBody = uploadsService.validateVoiceUploadBody;
+  validateImageUploadBody = uploadsService.validateImageUploadBody;
+});
+
+test("task create validation accepts the frontend task payload", () => {
+  const result = validateCreateTaskBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    title: "Study for chemistry midterm",
+    description: "Review practice problems",
+    type: "school",
+    workType: "study",
+    timeframe: "weekly",
+    dueAt: "2026-05-14T15:30:00-07:00",
+    priority: 1,
+    cognitiveLoad: 7,
+    estimatedMinutes: 90,
+    canSplit: true,
+    createdBy: "user",
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.title, "Study for chemistry midterm");
+    assert.equal(result.value.priority, 1);
+    assert.equal(result.value.cognitiveLoad, 7);
+    assert.ok(result.value.dueAt instanceof Date);
+  }
+});
+
+test("task validation rejects out-of-range priority and cognitive load", () => {
+  const badPriority = validateCreateTaskBody({
+    title: "Bad priority",
+    priority: 6,
+    cognitiveLoad: 4,
+  });
+
+  const badCognitiveLoad = validateCreateTaskBody({
+    title: "Bad cognitive load",
+    priority: 3,
+    cognitiveLoad: 8,
+  });
+
+  assert.equal(badPriority.ok, false);
+  assert.match(badPriority.ok ? "" : badPriority.error, /priority.*at most 5/);
+
+  assert.equal(badCognitiveLoad.ok, false);
+  assert.match(badCognitiveLoad.ok ? "" : badCognitiveLoad.error, /cognitiveLoad.*at most 7/);
+});
+
+test("task patch and complete validation allow status changes and actual minutes", () => {
+  const patch = validatePatchTaskBody({
+    status: "in_progress",
+    actualMinutes: 45,
+  });
+
+  const complete = validateCompleteTaskBody({
+    actualMinutes: 50,
+  });
+
+  assert.equal(patch.ok, true);
+  assert.equal(complete.ok, true);
+});
+
+test("task breakdown validation accepts replace and target block options", () => {
+  const valid = validateTaskBreakdownBody({
+    replaceExisting: true,
+    targetBlockMinutes: 45,
+  });
+  const empty = validateTaskBreakdownBody(undefined);
+  const badTarget = validateTaskBreakdownBody({
+    targetBlockMinutes: 10,
+  });
+  const unknown = validateTaskBreakdownBody({
+    force: true,
+  });
+
+  assert.equal(valid.ok, true);
+  assert.equal(empty.ok, true);
+  assert.equal(badTarget.ok, false);
+  assert.match(badTarget.ok ? "" : badTarget.error, /at least 15/);
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.ok ? "" : unknown.error, /Unsupported field/);
+});
+
+test("task breakdown builder keeps small tasks as one focused step", () => {
+  const steps = buildBreakdownSteps(
+    {
+      id: "task_small",
+      title: "Submit scholarship form",
+      workType: "admin",
+      estimatedMinutes: 30,
+      cognitiveLoad: 2,
+      canSplit: true,
+    },
+    45,
+  );
+
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]?.title, "Complete Submit scholarship form");
+  assert.equal(steps[0]?.estimatedMinutes, 30);
+});
+
+test("task breakdown builder splits large study tasks by target block length", () => {
+  const steps = buildBreakdownSteps(
+    {
+      id: "task_study",
+      title: "Study for chemistry midterm",
+      workType: "study",
+      estimatedMinutes: 180,
+      cognitiveLoad: 7,
+      canSplit: true,
+    },
+    45,
+  );
+
+  assert.equal(steps.length, 4);
+  assert.deepEqual(
+    steps.map((step) => step.title),
+    ["Review core material", "Practice problems or recall", "Self-test weak spots", "Summarize final takeaways"],
+  );
+  assert.deepEqual(
+    steps.map((step) => step.estimatedMinutes),
+    [45, 45, 45, 45],
+  );
+  assert.equal(steps[3]?.cognitiveLoad, 6);
+});
+
+test("task breakdown builder splits writing and project tasks with work-type templates", () => {
+  const writingSteps = buildBreakdownSteps(
+    {
+      id: "task_writing",
+      title: "History essay",
+      workType: "writing",
+      estimatedMinutes: 120,
+      cognitiveLoad: 5,
+      canSplit: true,
+    },
+    45,
+  );
+  const projectSteps = buildBreakdownSteps(
+    {
+      id: "task_project",
+      title: "CS project",
+      workType: "project",
+      estimatedMinutes: 200,
+      cognitiveLoad: 6,
+      canSplit: true,
+    },
+    50,
+  );
+
+  assert.equal(writingSteps.length, 3);
+  assert.equal(writingSteps[0]?.title, "Outline argument and evidence");
+  assert.equal(writingSteps[1]?.title, "Draft the main sections");
+
+  assert.equal(projectSteps.length, 4);
+  assert.equal(projectSteps[0]?.title, "Scope remaining work");
+  assert.equal(projectSteps[2]?.title, "Test the result");
+});
+
+test("calendar range validation requires start before end", () => {
+  const params = new URLSearchParams({
+    start: "2026-05-15T12:00:00-07:00",
+    end: "2026-05-15T11:00:00-07:00",
+  });
+
+  const result = validateCalendarRange(params);
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /endTime must be after startTime/);
+});
+
+test("calendar event validation accepts manual busy blocks", () => {
+  const result = validateCreateCalendarEventBody({
+    title: "Chemistry lecture",
+    description: "CHE 118",
+    location: "Sciences Lecture Hall",
+    startTime: "2026-05-11T09:00:00-07:00",
+    endTime: "2026-05-11T10:20:00-07:00",
+    isAllDay: false,
+    source: "manual",
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.title, "Chemistry lecture");
+    assert.ok(result.value.startTime instanceof Date);
+    assert.ok(result.value.endTime instanceof Date);
+  }
+});
+
+test("calendar patch validation rejects unknown fields", () => {
+  const result = validatePatchCalendarEventBody({
+    title: "Office hours",
+    provider: "google",
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /Unsupported field/);
+});
+
+test("scheduled block patch validation accepts mutable fields only", () => {
+  const goodPatch = validateScheduledBlockPatchBody({
+    title: "CS project sprint",
+    startTime: "2026-05-12T10:00:00-07:00",
+    endTime: "2026-05-12T11:30:00-07:00",
+    status: "accepted",
+  });
+
+  const badPatch = validateScheduledBlockPatchBody({
+    taskId: "should-not-be-editable",
+  });
+
+  assert.equal(goodPatch.ok, true);
+  assert.equal(badPatch.ok, false);
+  assert.match(badPatch.ok ? "" : badPatch.error, /Unsupported field/);
+});
+
+test("schedule generation validation accepts optional range and dry run", () => {
+  const result = validateGenerateScheduleBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    start: "2026-05-11T00:00:00-07:00",
+    end: "2026-05-18T00:00:00-07:00",
+    dryRun: true,
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.planningCycleId, "demo_cycle_2026_05_11");
+    assert.equal(result.value.dryRun, true);
+    assert.ok(result.value.start instanceof Date);
+    assert.ok(result.value.end instanceof Date);
+  }
+});
+
+test("schedule generation validation rejects partial or inverted ranges", () => {
+  const partial = validateGenerateScheduleBody({
+    start: "2026-05-11T00:00:00-07:00",
+  });
+  const inverted = validateGenerateScheduleBody({
+    start: "2026-05-18T00:00:00-07:00",
+    end: "2026-05-11T00:00:00-07:00",
+  });
+
+  assert.equal(partial.ok, false);
+  assert.match(partial.ok ? "" : partial.error, /start and end must be provided together/);
+
+  assert.equal(inverted.ok, false);
+  assert.match(inverted.ok ? "" : inverted.error, /endTime must be after startTime/);
+});
+
+test("schedule slot finder avoids busy windows and honors work hours", () => {
+  const slot = findFirstAvailableSlot({
+    range: {
+      start: new Date("2026-05-11T09:00:00-07:00"),
+      end: new Date("2026-05-11T17:00:00-07:00"),
+    },
+    durationMinutes: 45,
+    busyWindows: [
+      {
+        startTime: new Date("2026-05-11T09:00:00-07:00"),
+        endTime: new Date("2026-05-11T10:00:00-07:00"),
+      },
+    ],
+    preferences: {
+      workStartTime: "09:00",
+      workEndTime: "17:00",
+      minimumBreakMinutes: 15,
+      maxTotalWorkMinutesPerDay: 360,
+      maxHardWorkMinutesPerDay: 180,
+    },
+    dayUsage: new Map(),
+    cognitiveLoad: 4,
+  });
+
+  assert.ok(slot);
+  assert.equal(slot.startTime.toISOString(), new Date("2026-05-11T10:15:00-07:00").toISOString());
+  assert.equal(slot.endTime.toISOString(), new Date("2026-05-11T11:00:00-07:00").toISOString());
+});
+
+test("current insights query validation accepts scope and bounded limit", () => {
+  const valid = validateCurrentInsightsQuery(new URLSearchParams({ scope: "weekly", limit: "10" }));
+  const badScope = validateCurrentInsightsQuery(new URLSearchParams({ scope: "monthly" }));
+  const badLimit = validateCurrentInsightsQuery(new URLSearchParams({ limit: "50" }));
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.scope, "weekly");
+    assert.equal(valid.value.limit, 10);
+  }
+
+  assert.equal(badScope.ok, false);
+  assert.match(badScope.ok ? "" : badScope.error, /scope must be daily or weekly/);
+
+  assert.equal(badLimit.ok, false);
+  assert.match(badLimit.ok ? "" : badLimit.error, /limit must be an integer/);
+});
+
+test("generate insight validation accepts planning session and rejects bad ranges", () => {
+  const valid = validateGenerateInsightBody({
+    scope: "planning_session",
+    planningCycleId: "demo_cycle_2026_05_11",
+    start: "2026-05-11T00:00:00-07:00",
+    end: "2026-05-18T00:00:00-07:00",
+    trigger: "weekly_planning",
+  });
+  const invalid = validateGenerateInsightBody({
+    scope: "weekly",
+    start: "2026-05-18T00:00:00-07:00",
+    end: "2026-05-11T00:00:00-07:00",
+  });
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.scope, "planning_session");
+    assert.equal(valid.value.trigger, "weekly_planning");
+  }
+
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /end must be after start/);
+});
+
+test("daily check-in validation accepts required fields and adjustToday", () => {
+  const result = validateDailyCheckinBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    checkinDate: "2026-05-11",
+    energyScore: 2,
+    stressScore: 6,
+    availableCapacityMinutes: 120,
+    userNote: "Feeling overloaded.",
+    adjustToday: true,
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.energyScore, 2);
+    assert.equal(result.value.stressScore, 6);
+    assert.ok(result.value.checkinDate instanceof Date);
+  }
+});
+
+test("daily check-in validation rejects mood and sleep fields", () => {
+  const result = validateDailyCheckinBody({
+    checkinDate: "2026-05-11",
+    energyScore: 4,
+    stressScore: 3,
+    mood: "fine",
+    sleepHours: 7,
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /Unsupported field/);
+});
+
+test("check-in log validation accepts repeated stress and energy entries", () => {
+  const result = validateCheckinLogBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    loggedAt: "2026-05-11T15:45:00-07:00",
+    energyScore: 3,
+    stressScore: 6,
+    availableCapacityMinutes: 60,
+    userNote: "Afternoon energy dip.",
+    adjustToday: true,
+    source: "manual",
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.ok(result.value.loggedAt instanceof Date);
+    assert.equal(result.value.energyScore, 3);
+    assert.equal(result.value.stressScore, 6);
+    assert.equal(result.value.source, "manual");
+  }
+});
+
+test("check-in log validation rejects mood and out-of-range scores", () => {
+  const mood = validateCheckinLogBody({
+    loggedAt: "2026-05-11T15:45:00-07:00",
+    energyScore: 3,
+    stressScore: 6,
+    mood: "jaded",
+  });
+  const invalidScore = validateCheckinLogBody({
+    energyScore: 8,
+    stressScore: 6,
+  });
+
+  assert.equal(mood.ok, false);
+  assert.match(mood.ok ? "" : mood.error, /Unsupported field/);
+  assert.equal(invalidScore.ok, false);
+  assert.match(invalidScore.ok ? "" : invalidScore.error, /energyScore must be at most 7/);
+});
+
+test("daily schedule adjustment shortens urgent high-load blocks during overload", () => {
+  const suggestions = buildTodayScheduleAdjustmentSuggestions({
+    now: new Date("2026-05-11T09:00:00-07:00"),
+    checkin: {
+      id: "checkin",
+      energyScore: 2,
+      stressScore: 6,
+      availableCapacityMinutes: 120,
+      planningCycleId: "cycle",
+    },
+    replacementTasks: [],
+    blocks: [
+      {
+        id: "block_urgent",
+        taskId: "task_urgent",
+        title: "Chem midterm practice",
+        startTime: new Date("2026-05-11T10:00:00-07:00"),
+        endTime: new Date("2026-05-11T11:30:00-07:00"),
+        status: "accepted",
+        task: {
+          id: "task_urgent",
+          title: "Study for chemistry midterm",
+          priority: 1,
+          cognitiveLoad: 7,
+          dueAt: new Date("2026-05-12T13:00:00-07:00"),
+          estimatedMinutes: 180,
+          workType: "study",
+        },
+      },
+    ],
+  });
+
+  assert.equal(suggestions[0]?.action, "shorten");
+  assert.equal(suggestions[0]?.suggestedDurationMinutes, 45);
+});
+
+test("daily schedule adjustment replaces non-urgent deep work with lower-load task", () => {
+  const suggestions = buildTodayScheduleAdjustmentSuggestions({
+    now: new Date("2026-05-11T09:00:00-07:00"),
+    checkin: {
+      id: "checkin",
+      energyScore: 2,
+      stressScore: 6,
+      availableCapacityMinutes: null,
+      planningCycleId: "cycle",
+    },
+    replacementTasks: [
+      {
+        id: "task_light",
+        title: "Email professor",
+        priority: 3,
+        cognitiveLoad: 2,
+        dueAt: null,
+        estimatedMinutes: 20,
+      },
+    ],
+    blocks: [
+      {
+        id: "block_project",
+        taskId: "task_project",
+        title: "CS project architecture",
+        startTime: new Date("2026-05-11T14:00:00-07:00"),
+        endTime: new Date("2026-05-11T15:00:00-07:00"),
+        status: "proposed",
+        task: {
+          id: "task_project",
+          title: "CS project",
+          priority: 4,
+          cognitiveLoad: 6,
+          dueAt: new Date("2026-05-20T23:59:00-07:00"),
+          estimatedMinutes: 240,
+          workType: "project",
+        },
+      },
+    ],
+  });
+
+  assert.equal(suggestions[0]?.action, "replace_with_lower_load_task");
+  assert.equal(suggestions[0]?.replacementTask?.id, "task_light");
+});
+
+test("dashboard date validation accepts only valid YYYY-MM-DD dates", () => {
+  const valid = parseDashboardDate(new URLSearchParams({ date: "2026-05-11" }));
+  const invalidFormat = parseDashboardDate(new URLSearchParams({ date: "05-11-2026" }));
+  const invalidDate = parseDashboardDate(new URLSearchParams({ date: "2026-02-30" }));
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.date, "2026-05-11");
+    assert.equal(valid.value.start.getFullYear(), 2026);
+    assert.equal(valid.value.start.getMonth(), 4);
+    assert.equal(valid.value.start.getDate(), 11);
+    assert.equal(valid.value.start.getHours(), 0);
+  }
+
+  assert.equal(invalidFormat.ok, false);
+  assert.match(invalidFormat.ok ? "" : invalidFormat.error, /YYYY-MM-DD/);
+
+  assert.equal(invalidDate.ok, false);
+  assert.match(invalidDate.ok ? "" : invalidDate.error, /valid calendar date/);
+});
+
+test("chat message validation requires content", () => {
+  const valid = validateChatMessageBody({
+    content: "add chemistry review task due 2026-05-14 high priority",
+  });
+  const invalid = validateChatMessageBody({
+    threadId: "thread-id",
+  });
+
+  assert.equal(valid.ok, true);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /content is required/);
+});
+
+test("chat task priority questions resolve the next mentioned weekday", () => {
+  const result = resolveNextWeekdayDate(
+    "what to do i have to do monday whats my highest priority task",
+    new Date("2026-05-10T10:00:00-07:00"),
+  );
+
+  assert.equal(result?.weekday, "monday");
+  assert.equal(result?.date.toISOString().slice(0, 10), "2026-05-11");
+});
+
+test("mock parser does not turn read-only task questions into schedule actions", () => {
+  const actions = parseMockChatMessage("what to do i have to do monday whats my highest priority task");
+
+  assert.deepEqual(actions, []);
+});
+
+test("pending chat task creation merges difficulty and priority without requiring an estimate", () => {
+  const pendingPayload = {
+    title: "CS homework",
+    dueAt: "2026-05-10T14:00:00",
+    priority: 1,
+    cognitiveLoad: 7,
+    type: "school",
+    workType: "study",
+    timeframe: "daily",
+    ambiguous: true,
+  };
+
+  const merged = mergePendingCreateTaskPayload(pendingPayload, "difficulty 7 priority 3");
+
+  assert.ok(merged);
+  assert.equal(merged.payload.priority, 3);
+  assert.equal(merged.payload.cognitiveLoad, 7);
+  assert.equal(merged.payload.ambiguous, false);
+  assert.deepEqual(merged.missingFields, []);
+  assert.match(merged.assistantMessage, /review and confirm/i);
+});
+
+test("pending chat task creation becomes confirmable when all planning fields are present", () => {
+  const pendingPayload = {
+    title: "CS homework",
+    dueAt: "2026-05-10T14:00:00",
+    priority: 1,
+    cognitiveLoad: 7,
+    type: "school",
+    workType: "study",
+    timeframe: "daily",
+    ambiguous: true,
+  };
+
+  const merged = mergePendingCreateTaskPayload(pendingPayload, "difficulty 7 priority 3 90 minutes");
+
+  assert.ok(merged);
+  assert.equal(merged.payload.priority, 3);
+  assert.equal(merged.payload.cognitiveLoad, 7);
+  assert.equal(merged.payload.estimatedMinutes, 90);
+  assert.equal(merged.payload.ambiguous, false);
+  assert.deepEqual(merged.missingFields, []);
+  assert.match(merged.assistantMessage, /review and confirm/i);
+});
+
+test("chat create task planning validation requires title and difficulty but not time", () => {
+  assert.deepEqual(
+    getMissingCreateTaskPlanningFields({
+      title: "CS homework",
+      cognitiveLoad: 7,
+    }),
+    [],
+  );
+
+  assert.deepEqual(
+    getMissingCreateTaskPlanningFields({
+      title: "CS homework",
+      estimatedMinutes: 90,
+    }),
+    ["difficulty"],
+  );
+});
+
+test("chat follow-up update targets the latest saved task instead of pending creation", () => {
+  const payload = buildFollowUpTaskUpdatePayload(
+    { id: "task_cs_homework", title: "Computer Science Homework" },
+    "Can we actually change it to be priority 3 and difficulty 7",
+  );
+
+  assert.ok(payload);
+  assert.equal(payload.taskId, "task_cs_homework");
+  assert.equal(payload.title, "Computer Science Homework");
+  assert.equal(payload.operation, "update_fields");
+  assert.equal(payload.priority, 3);
+  assert.equal(payload.cognitiveLoad, 7);
+  assert.equal(payload.ambiguous, false);
+});
+
+test("mock parser creates task and event actions from simple text", () => {
+  const taskActions = parseMockChatMessage("add chemistry review task due 2026-05-14 high priority");
+  const eventActions = parseMockChatMessage("dentist appointment 2026-05-12 at 2pm");
+
+  assert.equal(taskActions[0]?.actionType, "CREATE_TASK");
+  assert.equal(taskActions[0]?.requiresConfirmation, false);
+  assert.equal(taskActions[0]?.inputPayload.priority, 1);
+
+  assert.equal(eventActions[0]?.actionType, "CREATE_EVENT");
+  assert.equal(eventActions[0]?.requiresConfirmation, true);
+  assert.equal(typeof eventActions[0]?.inputPayload.startTime, "string");
+});
+
+test("mock parser treats implicit midterm study request as a proposed task", () => {
+  const actions = parseMockChatMessage("i have a midterm on tuesday for bio at 1pm i need to study for this");
+  const eventAction = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+  assert.equal(actions[0]?.actionType, "CREATE_TASK");
+  assert.equal(actions[0]?.requiresConfirmation, true);
+  assert.equal(actions[0]?.inputPayload.title, "Study for bio midterm");
+  assert.equal(actions[0]?.inputPayload.workType, "study");
+  assert.equal(actions[0]?.inputPayload.cognitiveLoad, 6);
+  assert.equal(actions[0]?.inputPayload.estimatedMinutes, 180);
+
+  assert.equal(eventAction?.inputPayload.title, "bio midterm");
+  assert.equal(eventAction?.requiresConfirmation, true);
+  assert.equal(typeof eventAction?.inputPayload.startTime, "string");
+  assert.equal(typeof eventAction?.inputPayload.endTime, "string");
+
+  const startTime = new Date(eventAction?.inputPayload.startTime as string);
+  const endTime = new Date(eventAction?.inputPayload.endTime as string);
+  assert.equal(endTime.getTime() - startTime.getTime(), 60 * 60_000);
+});
+
+test("mock parser warns high-difficulty study tasks can affect the schedule", () => {
+  const actions = parseMockChatMessage("i have a bio midterm on wednesday at 1pm and need to study");
+  const taskAction = actions.find((action) => action.actionType === "CREATE_TASK");
+
+  assert.match(taskAction?.assistantSummary ?? "", /confirm before I add it/i);
+});
+
+test("mock parser requires confirmation or clarification for updates", () => {
+  const completeActions = parseMockChatMessage("complete chemistry review");
+  const moveActions = parseMockChatMessage("move my study block");
+
+  assert.equal(completeActions[0]?.actionType, "UPDATE_TASK");
+  assert.equal(completeActions[0]?.requiresConfirmation, true);
+  assert.equal(completeActions[0]?.ambiguous, false);
+
+  assert.equal(moveActions[0]?.actionType, "UPDATE_TASK");
+  assert.equal(moveActions[0]?.requiresConfirmation, true);
+  assert.equal(moveActions[0]?.ambiguous, true);
+});
+
+test("mock parser proposes schedule generation before creating blocks", () => {
+  const actions = parseMockChatMessage("plan my day");
+
+  assert.equal(actions[0]?.actionType, "GENERATE_SCHEDULE");
+  assert.equal(actions[0]?.requiresConfirmation, true);
+  assert.match(actions[0]?.assistantSummary ?? "", /confirm/i);
+});
+
+test("mock parser creates daily check-in actions from explicit scores", () => {
+  const actions = parseMockChatMessage("energy 2 stress 6 and I have 90 minutes available");
+
+  assert.equal(actions[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(actions[0]?.requiresConfirmation, false);
+  assert.equal(actions[0]?.ambiguous, false);
+  assert.equal(actions[0]?.inputPayload.energyScore, 2);
+  assert.equal(actions[0]?.inputPayload.stressScore, 6);
+  assert.equal(actions[0]?.inputPayload.availableCapacityMinutes, 90);
+  assert.equal(actions[0]?.inputPayload.adjustToday, true);
+});
+
+test("mock parser prompts for missing daily check-in score", () => {
+  const actions = parseMockChatMessage("I'm drained today");
+
+  assert.equal(actions[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(actions[0]?.requiresConfirmation, true);
+  assert.equal(actions[0]?.ambiguous, true);
+  assert.equal(actions[0]?.inputPayload.energyScore, 2);
+  assert.equal(actions[0]?.inputPayload.stressScore, undefined);
+});
+
+test("mock parser maps natural language stress and energy to scores", () => {
+  const lowEnergyHighStress = parseMockChatMessage("I'm super stressed and low energy today");
+  const calmHighEnergy = parseMockChatMessage("feeling calm and energized right now");
+  const maxStress = parseMockChatMessage("my energy is high but stress is max");
+
+  assert.equal(lowEnergyHighStress[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(lowEnergyHighStress[0]?.ambiguous, false);
+  assert.equal(lowEnergyHighStress[0]?.inputPayload.energyScore, 2);
+  assert.equal(lowEnergyHighStress[0]?.inputPayload.stressScore, 6);
+
+  assert.equal(calmHighEnergy[0]?.inputPayload.energyScore, 6);
+  assert.equal(calmHighEnergy[0]?.inputPayload.stressScore, 2);
+
+  assert.equal(maxStress[0]?.inputPayload.energyScore, 6);
+  assert.equal(maxStress[0]?.inputPayload.stressScore, 7);
+});
+
+test("mock parser handles edge-case AI prompt contract examples", async (t) => {
+  await t.test("creates lunch as a 30 minute busy block", () => {
+    const actions = parseMockChatMessage("I want lunch at 2:00PM for about 30 minutes");
+    const event = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+    assert.ok(event);
+    assert.equal(event.inputPayload.title, "Lunch");
+    assert.equal(event.inputPayload.durationMinutes, 30);
+    assert.equal(
+      new Date(event.inputPayload.endTime as string).getTime() -
+        new Date(event.inputPayload.startTime as string).getTime(),
+      30 * 60_000,
+    );
+  });
+
+  await t.test("moves a presentation one hour earlier when it got moved ahead", () => {
+    const actions = parseMockChatMessage("I have this presentation, but it got moved one hour ahead");
+    const update = actions.find((action) => action.actionType === "UPDATE_EVENT");
+
+    assert.ok(update);
+    assert.equal(update.inputPayload.operation, "move");
+    assert.equal(update.inputPayload.title, "presentation");
+    assert.equal(update.inputPayload.relativeMinutes, -60);
+    assert.equal(update.ambiguous, false);
+  });
+
+  await t.test("sets a presentation to an explicit new time range", () => {
+    const actions = parseMockChatMessage("I have this presentation, but it got moved to 7:00PM-9:00PM");
+    const update = actions.find((action) => action.actionType === "UPDATE_EVENT");
+
+    assert.ok(update);
+    assert.equal(update.inputPayload.operation, "move");
+    assert.equal(update.inputPayload.title, "presentation");
+    assert.equal(
+      new Date(update.inputPayload.endTime as string).getTime() -
+        new Date(update.inputPayload.startTime as string).getTime(),
+      120 * 60_000,
+    );
+  });
+
+  await t.test("infers quick meal as a ten minute block", () => {
+    const actions = parseMockChatMessage("I want a quick meal at 4:00");
+    const event = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+    assert.ok(event);
+    assert.equal(event.inputPayload.title, "Quick meal");
+    assert.equal(event.inputPayload.durationMinutes, 10);
+  });
+
+  await t.test("asks for wake-up time before scheduling stretch after waking up", () => {
+    const actions = parseMockChatMessage("I want to stretch for 30 minutes after I wake up");
+    const event = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+    assert.ok(event);
+    assert.equal(event.inputPayload.title, "Stretch");
+    assert.equal(event.inputPayload.durationMinutes, 30);
+    assert.equal(event.ambiguous, true);
+    assert.equal(event.requiresConfirmation, true);
+  });
+
+  await t.test("treats good-time questions as schedule proposals", () => {
+    const mathActions = parseMockChatMessage("when would be a good time to do my math homework");
+    const lunchActions = parseMockChatMessage("when should i get lunch");
+    const mondayLunchActions = parseMockChatMessage("yo on monday when should i eat lunch");
+
+    assert.equal(mathActions[0]?.actionType, "GENERATE_SCHEDULE");
+    assert.equal(lunchActions[0]?.actionType, "GENERATE_SCHEDULE");
+    assert.equal(mondayLunchActions[0]?.actionType, "GENERATE_SCHEDULE");
+  });
+
+  await t.test("creates today deadline task without estimated time", () => {
+    const actions = parseMockChatMessage("Add CS homework due today at 2 PM");
+    const task = actions.find((action) => action.actionType === "CREATE_TASK");
+
+    assert.ok(task);
+    assert.equal(task.inputPayload.title, "CS homework");
+    assert.equal(typeof task.inputPayload.dueAt, "string");
+    assert.equal(task.inputPayload.estimatedMinutes, undefined);
+  });
+
+  await t.test("creates exam event and study task from one sentence", () => {
+    const actions = parseMockChatMessage("I have a bio midterm Wednesday at 1 PM and I need to study for it");
+    const task = actions.find((action) => action.actionType === "CREATE_TASK");
+    const event = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+    assert.ok(task);
+    assert.ok(event);
+    assert.equal(task.inputPayload.title, "Study for bio midterm");
+    assert.equal(task.requiresConfirmation, true);
+    assert.equal(event.inputPayload.title, "bio midterm");
+  });
+
+  await t.test("keeps lower-priority task update confirmable", () => {
+    const actions = parseMockChatMessage("Make my history essay lower priority");
+    const update = actions.find((action) => action.actionType === "UPDATE_TASK");
+
+    assert.ok(update);
+    assert.equal(update.requiresConfirmation, true);
+    assert.equal(update.inputPayload.operation, "update_fields");
+  });
+
+  await t.test("marks cancel/delete requests as confirmation-required updates", () => {
+    const completeActions = parseMockChatMessage("complete chemistry review");
+    const moveActions = parseMockChatMessage("move my study block");
+
+    assert.equal(completeActions[0]?.requiresConfirmation, true);
+    assert.equal(moveActions[0]?.requiresConfirmation, true);
+  });
+
+  await t.test("splitting long study time still creates schedule proposal intent", () => {
+    const actions = parseMockChatMessage("Schedule 3 hours of studying before my exam tomorrow morning");
+
+    assert.equal(actions[0]?.actionType, "CREATE_TASK");
+    assert.equal(actions.some((action) => action.actionType === "GENERATE_SCHEDULE"), true);
+  });
+
+  await t.test("next Monday appointment resolves to a fixed event", () => {
+    const actions = parseMockChatMessage("I have a dentist appointment next Monday at 10");
+    const event = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+    assert.ok(event);
+    assert.equal(event.inputPayload.title, "dentist");
+    assert.equal(typeof event.inputPayload.startTime, "string");
+  });
+
+  await t.test("weekend project asks for schedule generation", () => {
+    const actions = parseMockChatMessage("I need to work on my project sometime this weekend, maybe two hours");
+
+    assert.equal(actions.some((action) => action.actionType === "GENERATE_SCHEDULE"), true);
+  });
+
+  await t.test("stress and energy planning prompt logs check-in and adjusts today", () => {
+    const actions = parseMockChatMessage("I'm stressed 7 and energy 2, what should I do today?");
+
+    assert.equal(actions[0]?.actionType, "DAILY_CHECKIN");
+    assert.equal(actions[0]?.inputPayload.energyScore, 2);
+    assert.equal(actions[0]?.inputPayload.stressScore, 7);
+    assert.equal(actions.some((action) => action.actionType === "ADJUST_TODAY"), true);
+  });
+});
+
+test("voice upload validation requires audioData and mimeType", () => {
+  const valid = validateVoiceUploadBody({ audioData: "base64string==", mimeType: "audio/webm" });
+  const missingAudio = validateVoiceUploadBody({ mimeType: "audio/webm" });
+  const missingMime = validateVoiceUploadBody({ audioData: "base64string==" });
+  const empty = validateVoiceUploadBody({});
+
+  assert.equal(valid.ok, true);
+  assert.equal(missingAudio.ok, false);
+  assert.equal(missingMime.ok, false);
+  assert.equal(empty.ok, false);
+});
+
+test("image upload validation requires imageData and mimeType", () => {
+  const valid = validateImageUploadBody({ images: [{ imageData: "base64string==", mimeType: "image/jpeg" }] });
+  const missingImage = validateImageUploadBody({ images: [{ mimeType: "image/jpeg" }] });
+  const missingMime = validateImageUploadBody({ images: [{ imageData: "base64string==" }] });
+  const empty = validateImageUploadBody({});
+
+  assert.equal(valid.ok, true);
+  assert.equal(missingImage.ok, false);
+  assert.equal(missingMime.ok, false);
+  assert.equal(empty.ok, false);
+});
+
+test("validateGeminiResponse passes through valid CREATE_TASK entry", () => {
+  const raw = [
+    {
+      actionType: "CREATE_TASK",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "I can add that task.",
+      inputPayload: { title: "Study for bio exam", dueAt: "2026-05-14T23:59:00Z", priority: 2, cognitiveLoad: 5 },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "CREATE_TASK");
+  assert.equal(result[0]?.requiresConfirmation, false);
+  assert.equal(result[0]?.inputPayload.title, "Study for bio exam");
+});
+
+test("validateGeminiResponse passes through valid CREATE_EVENT entry", () => {
+  const raw = [
+    {
+      actionType: "CREATE_EVENT",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "I can add that event.",
+      inputPayload: { title: "Dentist", startTime: "2026-05-12T14:00:00Z", endTime: "2026-05-12T15:00:00Z" },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "CREATE_EVENT");
+  assert.equal(result[0]?.inputPayload.startTime, "2026-05-12T14:00:00Z");
+});
+
+test("validateGeminiResponse passes through valid UPDATE_EVENT entry", () => {
+  const raw = [
+    {
+      actionType: "UPDATE_EVENT",
+      requiresConfirmation: true,
+      ambiguous: false,
+      assistantSummary: "I can move that event.",
+      inputPayload: {
+        operation: "move",
+        title: "presentation",
+        startTime: "2026-05-12T19:00:00Z",
+        endTime: "2026-05-12T21:00:00Z",
+        relativeMinutes: -60,
+      },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "UPDATE_EVENT");
+  assert.equal(result[0]?.requiresConfirmation, true);
+  assert.equal(result[0]?.inputPayload.operation, "move");
+  assert.equal(result[0]?.inputPayload.relativeMinutes, -60);
+});
+
+test("validateGeminiResponse passes through GENERATE_SCHEDULE with no required fields", () => {
+  const raw = [
+    {
+      actionType: "GENERATE_SCHEDULE",
+      requiresConfirmation: true,
+      ambiguous: false,
+      assistantSummary: "Generating your schedule.",
+      inputPayload: { rawText: "plan my day" },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "GENERATE_SCHEDULE");
+  assert.equal(result[0]?.requiresConfirmation, true);
+});
+
+test("validateGeminiResponse passes through valid DAILY_CHECKIN entry", () => {
+  const raw = [
+    {
+      actionType: "DAILY_CHECKIN",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Saved check-in.",
+      inputPayload: { energyScore: 3, stressScore: 6, availableCapacityMinutes: 120, adjustToday: true },
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.actionType, "DAILY_CHECKIN");
+  assert.equal(result[0]?.inputPayload.energyScore, 3);
+  assert.equal(result[0]?.inputPayload.stressScore, 6);
+});
+
+test("validateGeminiResponse skips entries missing actionType", () => {
+  const raw = [
+    {
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Missing action type.",
+      inputPayload: {},
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 0);
+});
+
+test("validateGeminiResponse skips entries with unknown actionType", () => {
+  const raw = [
+    {
+      actionType: "DO_SOMETHING_WEIRD",
+      requiresConfirmation: false,
+      ambiguous: false,
+      assistantSummary: "Unknown type.",
+      inputPayload: {},
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 0);
+});
+
+test("validateGeminiResponse uses empty object when inputPayload is not an object", () => {
+  const raw = [
+    {
+      actionType: "CREATE_TASK",
+      requiresConfirmation: false,
+      ambiguous: true,
+      assistantSummary: "Bad payload.",
+      inputPayload: "not-an-object",
+    },
+  ];
+
+  const result = validateGeminiResponse(raw);
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0]?.inputPayload, {});
+});
+
+test("validateGeminiResponse returns empty array for empty input", () => {
+  assert.deepEqual(validateGeminiResponse([]), []);
+});
+
+test("validateGeminiResponse returns empty array for non-array input", () => {
+  assert.deepEqual(validateGeminiResponse(null), []);
+  assert.deepEqual(validateGeminiResponse({ actionType: "CREATE_TASK" }), []);
+  assert.deepEqual(validateGeminiResponse("a string"), []);
+});
+
+test("AI correction query validation accepts filters and clamps limits", () => {
+  const valid = validateAiCorrectionQuery(
+    new URLSearchParams({
+      correctionType: "edited",
+      actionType: "CREATE_TASK",
+      limit: "25",
+    }),
+  );
+  const badType = validateAiCorrectionQuery(new URLSearchParams({ correctionType: "ignored" }));
+  const badLimit = validateAiCorrectionQuery(new URLSearchParams({ limit: "500" }));
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.correctionType, "edited");
+    assert.equal(valid.value.actionType, "CREATE_TASK");
+    assert.equal(valid.value.limit, 25);
+  }
+
+  assert.equal(badType.ok, false);
+  assert.match(badType.ok ? "" : badType.error, /correctionType/);
+  assert.equal(badLimit.ok, false);
+  assert.match(badLimit.ok ? "" : badLimit.error, /between 1 and 200/);
+});
+
+test("AI correction payload comparison ignores ambiguity bookkeeping", () => {
+  assert.equal(
+    hasPayloadCorrection(
+      { title: "CS homework", priority: 1, ambiguous: true },
+      { title: "CS homework", priority: 1, ambiguous: false },
+    ),
+    false,
+  );
+  assert.equal(
+    hasPayloadCorrection(
+      { title: "CS homework", priority: 1 },
+      { title: "CS homework", priority: 3 },
+    ),
+    true,
+  );
+});
+
+test("AI correction eval case uses corrected final payload when present", () => {
+  const evalCase = buildAiCorrectionEvalCase({
+    id: "correction_1",
+    actionType: "CREATE_TASK",
+    correctionType: "edited",
+    originalUserText: "can we make it priority 3 and difficulty 7",
+    proposedPayload: { title: "CS homework", priority: 1, cognitiveLoad: 5 },
+    correctedPayload: { title: "CS homework", priority: 3, cognitiveLoad: 7 },
+    finalPayload: { title: "CS homework", priority: 3, cognitiveLoad: 7 },
+    errorMessage: null,
+  });
+
+  assert.equal(evalCase.expectedActionType, "CREATE_TASK");
+  assert.deepEqual(evalCase.expectedPayload, { title: "CS homework", priority: 3, cognitiveLoad: 7 });
+  assert.deepEqual(evalCase.proposedPayload, { title: "CS homework", priority: 1, cognitiveLoad: 5 });
+});

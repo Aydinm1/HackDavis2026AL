@@ -1,0 +1,448 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id       String @id @default(cuid())
+  email    String @unique
+  name     String?
+  timezone String @default("America/Los_Angeles")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  preferences     UserPreferences?
+  calendarConnections CalendarConnection[]
+  planningCycles  PlanningCycle[]
+  tasks           Task[]
+  taskBreakdowns  TaskBreakdown[]
+  calendarEvents  CalendarEvent[]
+  scheduledBlocks ScheduledBlock[]
+  dailyCheckins   DailyCheckin[]
+  checkinLogs     CheckinLog[]
+  aiInsights      AiInsight[]
+  chatThreads     ChatThread[]
+  chatMessages    ChatMessage[]
+  aiActions       AiAction[]
+  aiCorrections   AiCorrection[]
+  uploadedInputs  UploadedInput[]
+}
+
+model UserPreferences {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  workStartTime               String  @default("09:00")
+  workEndTime                 String  @default("23:00")
+  preferredPlanningDay        String  @default("sunday")
+  preferredPlanningTime       String  @default("19:00")
+  preferredBlockLengthMinutes Int     @default(45)
+  minimumBreakMinutes         Int     @default(15)
+  maxTotalWorkMinutesPerDay   Int     @default(360)
+  maxHardWorkMinutesPerDay    Int     @default(180)
+  avoidsLateNightWork         Boolean @default(true)
+  reminderSensitivity         String  @default("medium") // low | medium | high
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PlanningCycle {
+  id     String @id @default(cuid())
+  userId String
+
+  cycleStartDate DateTime
+  cycleEndDate   DateTime
+
+  status            String    @default("active") // planned | active | completed | archived
+  intakeCompletedAt DateTime?
+
+  userStatedWeekGoal  String?
+  userStatedStressors String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks           Task[]
+  scheduledBlocks ScheduledBlock[]
+  dailyCheckins   DailyCheckin[]
+  checkinLogs     CheckinLog[]
+  aiInsights      AiInsight[]
+  chatThreads     ChatThread[]
+
+  @@index([userId, cycleStartDate])
+}
+
+model Task {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+  parentTaskId    String?
+
+  title       String
+  description String?
+
+  type      String @default("school") // school | work | personal | admin | health | social
+  workType  String @default("focus") // study | writing | admin | errand | creative | reading | project | personal
+  timeframe String @default("weekly") // daily | weekly | monthly | quarterly | yearly
+  status    String @default("todo") // todo | scheduled | in_progress | completed | deferred | cancelled
+
+  dueAt DateTime?
+
+  priority         Int @default(3) // 1-5
+  cognitiveLoad    Int @default(4) // 1-7
+  estimatedMinutes Int?
+  actualMinutes    Int?
+
+  canSplit Boolean @default(true)
+
+  createdBy String @default("user") // user | ai | system | image | voice | chat
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle   PlanningCycle?   @relation(fields: [planningCycleId], references: [id])
+  taskBreakdowns  TaskBreakdown[]
+  scheduledBlocks ScheduledBlock[]
+
+  @@index([userId, dueAt])
+  @@index([userId, status])
+  @@index([planningCycleId])
+}
+
+model TaskBreakdown {
+  id     String @id @default(cuid())
+  userId String
+  taskId String
+
+  title       String
+  description String?
+
+  sequenceOrder    Int
+  estimatedMinutes Int?
+  cognitiveLoad    Int @default(4) // 1-7
+
+  status    String @default("todo") // todo | scheduled | completed | skipped
+  createdBy String @default("ai") // ai | user | system
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  scheduledBlocks ScheduledBlock[]
+
+  @@index([userId, taskId])
+}
+
+model CalendarEvent {
+  id     String @id @default(cuid())
+  userId String
+
+  provider        String? // google | apple | manual | mock
+  externalEventId String?
+  calendarId      String?
+
+  title       String
+  description String?
+  location    String?
+
+  startTime DateTime
+  endTime   DateTime
+
+  isAllDay Boolean @default(false)
+
+  source String @default("manual") // google_import | manual | app_generated | image | voice | chat
+  status String @default("confirmed") // confirmed | tentative | cancelled
+
+  rawProviderData Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, externalEventId])
+  @@index([userId, startTime, endTime])
+}
+
+model CalendarConnection {
+  id     String @id @default(cuid())
+  userId String
+
+  provider   String @default("google")
+  calendarId String @default("primary")
+  calendarSummary String?
+  calendarDescription String?
+  calendarBackgroundColor String?
+  accessRole String?
+  isPrimary Boolean @default(false)
+  isSelected Boolean @default(true)
+
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  expiresAt             DateTime?
+  scope                 String?
+  tokenType             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, calendarId])
+  @@index([userId, provider])
+}
+
+model ScheduledBlock {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+  taskId          String?
+  taskBreakdownId String?
+
+  title String
+
+  startTime DateTime
+  endTime   DateTime
+
+  status String @default("proposed") // proposed | accepted | completed | skipped | rescheduled | cancelled
+
+  createdBy String @default("agent") // user | agent | system
+  source    String @default("scheduler") // scheduler | chat | manual | daily_adjustment
+
+  schedulingReason String?
+
+  scheduleScore         Float?
+  energyMatchScore      Float?
+  deadlineUrgencyScore  Float?
+  cognitiveBalanceScore Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
+  task          Task?          @relation(fields: [taskId], references: [id])
+  taskBreakdown TaskBreakdown? @relation(fields: [taskBreakdownId], references: [id])
+
+  @@index([userId, startTime, endTime])
+  @@index([userId, status])
+  @@index([planningCycleId])
+  @@index([taskId])
+}
+
+model DailyCheckin {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+
+  checkinDate DateTime
+
+  energyScore Int // 1-7
+  stressScore Int // 1-7
+
+  availableCapacityMinutes Int?
+  userNote                 String?
+
+  createdAt DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
+
+  aiInsights AiInsight[]
+
+  @@unique([userId, checkinDate])
+  @@index([planningCycleId])
+}
+
+model CheckinLog {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+
+  loggedAt DateTime @default(now())
+
+  energyScore Int // 1-7
+  stressScore Int // 1-7
+
+  availableCapacityMinutes Int?
+  userNote                 String?
+  source                   String @default("manual") // manual | chat | voice | image | system
+
+  createdAt DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
+
+  aiInsights AiInsight[]
+
+  @@index([userId, loggedAt])
+  @@index([planningCycleId])
+}
+
+model AiInsight {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+  dailyCheckinId  String?
+  checkinLogId    String?
+
+  scope       String @default("daily") // daily | weekly | longitudinal
+  insightType String // low_energy_plan | recovery_window | workload_warning | completion_pattern | etc.
+
+  title String
+  body  String
+
+  severity        String @default("info") // info | caution | urgent
+  confidenceScore Float?
+
+  sourceData Json?
+
+  createdAt DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
+  dailyCheckin  DailyCheckin?  @relation(fields: [dailyCheckinId], references: [id])
+  checkinLog    CheckinLog?    @relation(fields: [checkinLogId], references: [id])
+
+  @@index([userId, scope])
+  @@index([planningCycleId])
+  @@index([checkinLogId])
+}
+
+model ChatThread {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+  title           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
+
+  messages  ChatMessage[]
+  aiActions AiAction[]
+  aiCorrections AiCorrection[]
+
+  @@index([userId, updatedAt])
+}
+
+model ChatMessage {
+  id       String @id @default(cuid())
+  threadId String
+  userId   String
+
+  role    String // user | assistant | system | tool
+  content String
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  aiActions AiAction[]
+  aiCorrections AiCorrection[]
+
+  @@index([threadId, createdAt])
+}
+
+model AiAction {
+  id     String @id @default(cuid())
+  userId String
+
+  threadId  String?
+  messageId String?
+
+  actionType String
+  status     String @default("proposed") // proposed | confirmed | executed | failed | cancelled
+
+  requiresConfirmation Boolean @default(false)
+
+  inputPayload  Json
+  resultPayload Json?
+  errorMessage  String?
+
+  createdAt  DateTime  @default(now())
+  executedAt DateTime?
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread  ChatThread?  @relation(fields: [threadId], references: [id])
+  message ChatMessage? @relation(fields: [messageId], references: [id])
+
+  aiCorrections AiCorrection[]
+
+  @@index([userId, status])
+  @@index([threadId])
+}
+
+model AiCorrection {
+  id     String @id @default(cuid())
+  userId String
+
+  aiActionId String?
+  threadId   String?
+  messageId  String?
+
+  correctionType String // confirmed | edited | cancelled | failed
+  source         String @default("chat") // chat | image | voice | system
+  actionType     String
+
+  originalUserText String?
+  proposedPayload  Json
+  correctedPayload Json?
+  finalPayload     Json?
+  errorMessage     String?
+
+  createdAt DateTime @default(now())
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiAction AiAction?    @relation(fields: [aiActionId], references: [id], onDelete: SetNull)
+  thread   ChatThread?  @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  message  ChatMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([userId, correctionType])
+  @@index([userId, actionType])
+  @@index([aiActionId])
+}
+
+model UploadedInput {
+  id     String @id @default(cuid())
+  userId String
+
+  sourceType String // image | voice | text
+  fileUrl    String?
+
+  rawTextExtracted String?
+  parsedPayload    Json?
+
+  confidenceScore Float?
+  status          String @default("pending") // pending | parsed | confirmed | rejected | failed
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
