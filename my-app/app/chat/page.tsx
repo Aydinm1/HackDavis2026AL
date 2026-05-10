@@ -13,7 +13,7 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm"
       onClick={onClose}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -25,7 +25,7 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
       />
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors text-lg"
+        className="absolute top-4 right-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 text-lg"
       >
         ×
       </button>
@@ -37,7 +37,13 @@ type ActionStatus = "proposed" | "executed" | "failed" | "cancelled";
 
 type AiAction = {
   id: string;
-  actionType: "CREATE_TASK" | "CREATE_EVENT" | "UPDATE_TASK" | "GENERATE_SCHEDULE" | "DAILY_CHECKIN" | "ADJUST_TODAY";
+  actionType:
+    | "CREATE_TASK"
+    | "CREATE_EVENT"
+    | "UPDATE_TASK"
+    | "GENERATE_SCHEDULE"
+    | "DAILY_CHECKIN"
+    | "ADJUST_TODAY";
   status: ActionStatus;
   requiresConfirmation: boolean;
   inputPayload: Record<string, unknown>;
@@ -64,63 +70,89 @@ type ActionResult = {
   error?: string;
 };
 
-const ACTION_COLORS: Record<string, string> = {
-  CREATE_TASK: "bg-violet-100 text-violet-800 border-violet-200",
-  CREATE_EVENT: "bg-blue-100 text-blue-800 border-blue-200",
-  UPDATE_TASK: "bg-amber-100 text-amber-800 border-amber-200",
-  GENERATE_SCHEDULE: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  DAILY_CHECKIN: "bg-cyan-100 text-cyan-800 border-cyan-200",
-  ADJUST_TODAY: "bg-teal-100 text-teal-800 border-teal-200",
+type Level = "high" | "medium" | "low";
+
+function priorityLevel(priority: unknown): Level | null {
+  if (typeof priority !== "number") return null;
+  if (priority <= 2) return "high";
+  if (priority === 3) return "medium";
+  return "low";
+}
+
+function difficultyLevel(load: unknown): Level | null {
+  if (typeof load !== "number") return null;
+  if (load <= 2) return "low";
+  if (load <= 5) return "medium";
+  return "high";
+}
+
+const dotColor: Record<Level, string> = {
+  high: "bg-[#DD2020]",
+  medium: "bg-[#FF9500]",
+  low: "bg-[#029C05]",
 };
 
-type AdjustmentAction = "keep" | "shorten" | "move" | "skip" | "replace_with_lower_load_task";
-
-const ADJUSTMENT_BADGE_COLORS: Record<AdjustmentAction, string> = {
-  keep: "bg-green-100 text-green-800 border-green-200",
-  shorten: "bg-amber-100 text-amber-800 border-amber-200",
-  move: "bg-blue-100 text-blue-800 border-blue-200",
-  skip: "bg-red-100 text-red-800 border-red-200",
-  replace_with_lower_load_task: "bg-violet-100 text-violet-800 border-violet-200",
+const textColor: Record<Level, string> = {
+  high: "text-[#DD2020]",
+  medium: "text-[#FF9500]",
+  low: "text-[#029C05]",
 };
 
-const ADJUSTMENT_BADGE_LABELS: Record<AdjustmentAction, string> = {
-  keep: "Keep",
-  shorten: "Shorten",
-  move: "Move",
-  skip: "Skip",
-  replace_with_lower_load_task: "Replace",
+const levelLabel: Record<Level, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  executed: "bg-green-100 text-green-700",
-  proposed: "bg-yellow-100 text-yellow-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-zinc-100 text-zinc-500",
-};
-
-function PayloadRow({ label, value }: { label: string; value: unknown }) {
-  if (value === undefined || value === null || value === "") return null;
-  const display =
-    typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+function Indicator({ level, suffix }: { level: Level | null; suffix: string }) {
+  if (!level) return null;
   return (
-    <div className="flex gap-2 text-xs">
-      <span className="shrink-0 font-medium text-zinc-500 w-28">{label}</span>
-      <span className="text-zinc-800 font-mono break-all">{display}</span>
-    </div>
+    <span
+      className={`inline-flex items-center gap-1.5 ${textColor[level]}`}
+      style={{
+        fontFamily: '"Plus Jakarta Sans"',
+        fontSize: "12px",
+        fontStyle: "normal",
+        fontWeight: 300,
+        lineHeight: "normal",
+      }}
+    >
+      <span className={`h-2 w-2 rounded-full ${dotColor[level]}`} />
+      {levelLabel[level]} {suffix}
+    </span>
   );
 }
 
-function extractFollowUpAction(action: AiAction) {
-  const proposedScheduleAction = action.resultPayload?.proposedScheduleAction;
-  if (
-    typeof proposedScheduleAction === "object" &&
-    proposedScheduleAction !== null &&
-    !Array.isArray(proposedScheduleAction)
-  ) {
-    return proposedScheduleAction as AiAction;
-  }
+function formatTimeShort(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" })
+    .format(d)
+    .toLowerCase()
+    .replace(/\s/g, "");
+}
 
-  return null;
+function ordinalSuffix(day: number) {
+  if (day >= 11 && day <= 13) return "th";
+  switch (day % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+function formatLongDate(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(d);
+  const month = new Intl.DateTimeFormat("en-US", { month: "long" }).format(d);
+  const day = d.getDate();
+  return `${weekday}, ${month} ${day}${ordinalSuffix(day)}, ${d.getFullYear()}`;
 }
 
 function ActionCard({
@@ -130,168 +162,57 @@ function ActionCard({
   isPending,
 }: {
   action: AiAction;
-  onConfirm: (actionId: string, inputPayload?: Record<string, unknown>) => void;
+  onConfirm: (actionId: string) => void;
   onCancel: (actionId: string) => void;
   isPending: boolean;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [draftPayload, setDraftPayload] = useState(() => JSON.stringify(action.inputPayload, null, 2));
-  const [draftError, setDraftError] = useState<string | null>(null);
   const p = action.inputPayload;
-  const colorClass = ACTION_COLORS[action.actionType] ?? "bg-zinc-100 text-zinc-700 border-zinc-200";
-  const statusClass = STATUS_COLORS[action.status] ?? "bg-zinc-100 text-zinc-500";
+  const title = typeof p.title === "string" ? p.title : "(untitled)";
+  const startRaw =
+    typeof p.startTime === "string" ? p.startTime : typeof p.dueAt === "string" ? p.dueAt : null;
+  const endRaw = typeof p.endTime === "string" ? p.endTime : null;
+  const startLabel = startRaw ? formatTimeShort(startRaw) : null;
+  const endLabel = endRaw ? formatTimeShort(endRaw) : null;
+  const dateLabel = startRaw ? formatLongDate(startRaw) : null;
+  const pLevel = priorityLevel(p.priority);
+  const dLevel = difficultyLevel(p.cognitiveLoad);
   const canConfirm = action.status === "proposed" && !p.ambiguous;
   const canCancel = action.status === "proposed";
-  const followUpAction = extractFollowUpAction(action);
-
-  function parseDraftPayload() {
-    try {
-      const parsed: unknown = JSON.parse(draftPayload);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        setDraftError("Payload must be a JSON object.");
-        return null;
-      }
-
-      setDraftError(null);
-      return parsed as Record<string, unknown>;
-    } catch {
-      setDraftError("Payload must be valid JSON.");
-      return null;
-    }
-  }
-
-  function confirmWithDraft() {
-    if (!isEditing) {
-      onConfirm(action.id);
-      return;
-    }
-
-    const parsed = parseDraftPayload();
-    if (!parsed) return;
-    onConfirm(action.id, parsed);
-  }
 
   return (
-    <div className={`rounded-lg border p-3 space-y-2 ${colorClass}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold tracking-wide">{action.actionType}</span>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusClass}`}>
-          {action.status}
-        </span>
-      </div>
-
-      <div className="space-y-1 bg-white/60 rounded p-2">
-        {action.actionType === "ADJUST_TODAY" && action.status === "executed" && action.resultPayload ? (
-          <div className="space-y-2">
-            {typeof action.resultPayload.summary === "string" && (
-              <p className="text-xs text-zinc-600">{action.resultPayload.summary}</p>
-            )}
-            {Array.isArray(action.resultPayload.suggestedAdjustments) &&
-              (action.resultPayload.suggestedAdjustments as Record<string, unknown>[]).map((adj, i) => {
-                const adjAction = adj.action as AdjustmentAction;
-                const badgeClass = ADJUSTMENT_BADGE_COLORS[adjAction] ?? "bg-zinc-100 text-zinc-700 border-zinc-200";
-                const label = ADJUSTMENT_BADGE_LABELS[adjAction] ?? String(adj.action);
-                return (
-                  <div key={String(adj.scheduledBlockId ?? i)} className="rounded-md border border-zinc-200 bg-white p-2">
-                    <div className="flex items-start justify-between gap-1">
-                      <span className="text-xs font-medium text-zinc-900">{String(adj.title ?? "")}</span>
-                      <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-xs font-semibold ${badgeClass}`}>
-                        {label}
-                      </span>
-                    </div>
-                    {typeof adj.reason === "string" && (
-                      <p className="mt-0.5 text-xs text-zinc-500">{adj.reason}</p>
-                    )}
-                    {adjAction === "shorten" && typeof adj.suggestedDurationMinutes === "number" && (
-                      <p className="mt-0.5 text-xs text-amber-700">
-                        {adj.suggestedDurationMinutes} min suggested (currently {String(adj.currentDurationMinutes)} min)
-                      </p>
-                    )}
-                    {adjAction === "replace_with_lower_load_task" &&
-                      typeof adj.replacementTask === "object" &&
-                      adj.replacementTask !== null && (
-                        <p className="mt-0.5 text-xs text-violet-700">
-                          Replace with: {String((adj.replacementTask as Record<string, unknown>).title ?? "")}
-                        </p>
-                      )}
-                  </div>
-                );
-              })}
-          </div>
-        ) : isEditing ? (
-          <div className="space-y-2">
-            <textarea
-              value={draftPayload}
-              onChange={(event) => {
-                setDraftPayload(event.target.value);
-                setDraftError(null);
-              }}
-              rows={10}
-              className="w-full resize-y rounded-md border border-white/80 bg-white p-2 font-mono text-xs text-zinc-800 outline-none focus:border-zinc-400"
-            />
-            {draftError && <div className="text-xs font-medium text-red-600">{draftError}</div>}
-          </div>
-        ) : (
-          <>
-            <PayloadRow label="title" value={p.title} />
-            <PayloadRow label="dueAt" value={p.dueAt} />
-            <PayloadRow label="startTime" value={p.startTime} />
-            <PayloadRow label="endTime" value={p.endTime} />
-            <PayloadRow label="priority" value={p.priority} />
-            <PayloadRow label="cognitiveLoad" value={p.cognitiveLoad} />
-            <PayloadRow label="type" value={p.type} />
-            <PayloadRow label="workType" value={p.workType} />
-            <PayloadRow label="timeframe" value={p.timeframe} />
-            <PayloadRow label="description" value={p.description} />
-            <PayloadRow label="operation" value={p.operation} />
-            <PayloadRow label="isAllDay" value={p.isAllDay} />
-            <PayloadRow label="estimatedMinutes" value={p.estimatedMinutes} />
-            <PayloadRow label="energyScore" value={p.energyScore} />
-            <PayloadRow label="stressScore" value={p.stressScore} />
-            <PayloadRow label="capacity" value={p.availableCapacityMinutes} />
-            <PayloadRow label="checkinDate" value={p.checkinDate} />
-            <PayloadRow label="trigger" value={p.trigger} />
-            <PayloadRow label="ambiguous" value={p.ambiguous} />
-          </>
-        )}
-        {action.requiresConfirmation && (
-          <div className="text-xs text-amber-600 font-medium pt-1">⚠ Requires confirmation</div>
-        )}
-        {action.errorMessage && (
-          <div className="text-xs text-red-600 font-medium pt-1">✗ {action.errorMessage}</div>
-        )}
-        {action.status === "executed" && action.resultPayload && (
-          <div className="text-xs text-green-700 font-medium pt-1">✓ Saved to DB</div>
-        )}
-        {followUpAction && (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
-            Schedule impact detected. A revised schedule proposal action is ready below.
-          </div>
-        )}
-      </div>
-
-      {(canConfirm || canCancel) && (
-        <div className="flex justify-end gap-2">
-          {canConfirm && (
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => {
-                setIsEditing((current) => !current);
-                setDraftPayload(JSON.stringify(action.inputPayload, null, 2));
-                setDraftError(null);
-              }}
-              className="rounded-md border border-white/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50"
-            >
-              {isEditing ? "Close edit" : "Edit"}
-            </button>
+    <div className="rounded-2xl border border-white/5 bg-[#101010] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-[#F5F5F5]">{title}</p>
+          {dateLabel && (
+            <p className="caption mt-1 text-[14px] text-[#A0A0A0]">{dateLabel}</p>
           )}
+        </div>
+        {(startLabel || endLabel) && (
+          <div className="caption shrink-0 text-[10px] text-[#A0A0A0]">
+            {startLabel}
+            {startLabel && endLabel ? " - " : null}
+            {endLabel}
+          </div>
+        )}
+      </div>
+      {(pLevel || dLevel) && (
+        <div className="mt-3 flex flex-wrap items-center gap-5">
+          <Indicator level={pLevel} suffix="Priority" />
+          <Indicator level={dLevel} suffix="Difficulty" />
+        </div>
+      )}
+      {action.errorMessage && (
+        <p className="mt-3 text-xs text-red-400">{action.errorMessage}</p>
+      )}
+      {(canConfirm || canCancel) && (
+        <div className="mt-3 flex justify-end gap-2">
           {canCancel && (
             <button
               type="button"
               disabled={isPending}
               onClick={() => onCancel(action.id)}
-              className="rounded-md border border-white/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50"
+              className="rounded-full border border-white/15 px-3 py-1 text-xs text-[#A0A0A0] disabled:opacity-50"
             >
               Cancel
             </button>
@@ -300,13 +221,16 @@ function ActionCard({
             <button
               type="button"
               disabled={isPending}
-              onClick={confirmWithDraft}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+              onClick={() => onConfirm(action.id)}
+              className="rounded-full border border-white/30 px-3 py-1 text-xs text-[#F5F5F5] disabled:opacity-50"
             >
-              {isPending ? "Working..." : "Confirm"}
+              {isPending ? "..." : "Confirm"}
             </button>
           )}
         </div>
+      )}
+      {action.status === "executed" && (
+        <p className="mt-2 text-[10px] uppercase tracking-wide text-emerald-500">Saved</p>
       )}
     </div>
   );
@@ -320,7 +244,7 @@ function Message({
   onImageClick,
 }: {
   entry: ChatEntry;
-  onConfirm: (actionId: string, inputPayload?: Record<string, unknown>) => void;
+  onConfirm: (actionId: string) => void;
   onCancel: (actionId: string) => void;
   pendingActionIds: Set<string>;
   onImageClick: (src: string) => void;
@@ -337,7 +261,7 @@ function Message({
               key={i}
               src={url}
               alt={`Uploaded image ${i + 1}`}
-              className="h-40 max-w-[240px] rounded-2xl rounded-br-sm border border-zinc-200 object-cover cursor-zoom-in"
+              className="h-40 max-w-[240px] cursor-zoom-in rounded-2xl border border-white/10 object-cover"
               onClick={() => onImageClick(url)}
             />
           ))}
@@ -347,8 +271,8 @@ function Message({
         <div
           className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
             isUser
-              ? "bg-violet-600 text-white rounded-br-sm"
-              : "bg-zinc-100 text-zinc-800 rounded-bl-sm"
+              ? "rounded-br-sm bg-zinc-700/60 text-[#F5F5F5]"
+              : "rounded-bl-sm bg-transparent text-[#F5F5F5]"
           }`}
         >
           {entry.content}
@@ -356,7 +280,7 @@ function Message({
       )}
 
       {entry.actions && entry.actions.length > 0 && (
-        <div className="w-full max-w-sm space-y-2">
+        <div className="w-full max-w-md space-y-2">
           {entry.actions.map((action) => (
             <ActionCard
               key={action.id}
@@ -371,14 +295,6 @@ function Message({
     </div>
   );
 }
-
-const EXAMPLE_PROMPTS = [
-  "I need to study for my bio exam before Friday, it'll probably take 3 hours",
-  "Add dentist appointment on 2026-05-15 at 10am",
-  "Complete my chemistry lab report",
-  "Plan my day",
-  "What's the weather like?",
-];
 
 type DbAiAction = {
   id: string;
@@ -404,10 +320,14 @@ function dbMessageToChatEntry(msg: DbMessage): ChatEntry | null {
     actionType: a.actionType as AiAction["actionType"],
     status: a.status as ActionStatus,
     requiresConfirmation: a.requiresConfirmation,
-    inputPayload: (typeof a.inputPayload === "object" && a.inputPayload !== null && !Array.isArray(a.inputPayload)
+    inputPayload: (typeof a.inputPayload === "object" &&
+    a.inputPayload !== null &&
+    !Array.isArray(a.inputPayload)
       ? a.inputPayload
       : {}) as Record<string, unknown>,
-    resultPayload: (typeof a.resultPayload === "object" && a.resultPayload !== null && !Array.isArray(a.resultPayload)
+    resultPayload: (typeof a.resultPayload === "object" &&
+    a.resultPayload !== null &&
+    !Array.isArray(a.resultPayload)
       ? a.resultPayload
       : null) as Record<string, unknown> | null,
     errorMessage: a.errorMessage,
@@ -418,6 +338,8 @@ function dbMessageToChatEntry(msg: DbMessage): ChatEntry | null {
     actions: actions.length > 0 ? actions : undefined,
   };
 }
+
+const TEXTAREA_MAX_HEIGHT = 160;
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatEntry[]>([]);
@@ -439,18 +361,27 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load most recent thread on mount
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+  }, [input]);
+
   useEffect(() => {
     async function loadHistory() {
       try {
         const threadsRes = await fetch("/api/chat/threads");
-        const threadsJson = await threadsRes.json() as { data?: { id: string }[] };
+        const threadsJson = (await threadsRes.json()) as { data?: { id: string }[] };
         const threads = threadsJson.data ?? [];
         if (threads.length === 0) return;
 
         const mostRecent = threads[0];
         const msgsRes = await fetch(`/api/chat/threads/${mostRecent.id}/messages`);
-        const msgsJson = await msgsRes.json() as { data?: DbMessage[] };
+        const msgsJson = (await msgsRes.json()) as { data?: DbMessage[] };
         const dbMessages = msgsJson.data ?? [];
 
         const entries = dbMessages.flatMap((m) => {
@@ -461,7 +392,7 @@ export default function ChatPage() {
         setThreadId(mostRecent.id);
         setMessages(entries);
       } catch {
-        // silently ignore — user just starts a fresh thread
+        /* fresh thread */
       } finally {
         setLoadingHistory(false);
       }
@@ -479,8 +410,10 @@ export default function ChatPage() {
   const handleUploadResult = useCallback((data: UploadResponseData) => {
     const summary =
       data.parsedItems.length > 0
-        ? data.parsedItems.map((p) => p.assistantSummary).filter(Boolean).join(" ") ||
-          `Found ${data.parsedItems.length} action(s).`
+        ? data.parsedItems
+            .map((p) => p.assistantSummary)
+            .filter(Boolean)
+            .join(" ") || `Found ${data.parsedItems.length} action(s).`
         : "No actions detected.";
 
     setMessages((prev) => [
@@ -490,47 +423,29 @@ export default function ChatPage() {
   }, []);
 
   function replaceActionInMessages(action: AiAction) {
-    const followUpAction = extractFollowUpAction(action);
-
     setMessages((prev) =>
       prev.map((message) => {
         if (!message.actions?.some((existingAction) => existingAction.id === action.id)) {
           return message;
         }
-
-        const nextActions = message.actions.map((existingAction) =>
-          existingAction.id === action.id ? action : existingAction,
-        );
-
-        if (followUpAction && !nextActions.some((existingAction) => existingAction.id === followUpAction.id)) {
-          nextActions.push(followUpAction);
-        }
-
         return {
           ...message,
-          actions: nextActions,
+          actions: message.actions.map((existingAction) =>
+            existingAction.id === action.id ? action : existingAction,
+          ),
         };
       }),
     );
   }
 
-  async function updateAction(
-    actionId: string,
-    operation: "confirm" | "cancel",
-    inputPayload?: Record<string, unknown>,
-  ) {
+  async function updateAction(actionId: string, operation: "confirm" | "cancel") {
     if (pendingActionIds.has(actionId)) return;
-
     setPendingActionIds((prev) => new Set(prev).add(actionId));
-
     try {
       const res = await fetch(`/api/ai-actions/${actionId}/${operation}`, {
         method: "POST",
-        headers: inputPayload ? { "Content-Type": "application/json" } : undefined,
-        body: inputPayload ? JSON.stringify({ inputPayload }) : undefined,
       });
       const json = (await res.json()) as ActionResult;
-
       if (!res.ok || !json.data) {
         setMessages((prev) => [
           ...prev,
@@ -541,7 +456,6 @@ export default function ChatPage() {
         ]);
         return;
       }
-
       replaceActionInMessages(json.data);
     } catch {
       setMessages((prev) => [
@@ -605,13 +519,15 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ audioData, mimeType }),
       });
-      const json = await res.json() as { data?: UploadResponseData; error?: string };
+      const json = (await res.json()) as { data?: UploadResponseData; error?: string };
       if (!res.ok || !json.data) {
-        setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Voice upload failed." }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: json.error ?? "Voice upload failed." },
+        ]);
         return;
       }
       const { transcript, ...rest } = json.data;
-      // Replace the placeholder with the real transcript
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
@@ -625,7 +541,10 @@ export default function ChatPage() {
       });
       handleUploadResult(rest);
     } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "Network error during voice upload." }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Network error during voice upload." },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -660,7 +579,6 @@ export default function ChatPage() {
 
     try {
       if (imagesToSend.length > 0) {
-        // Images (+ optional text) go together as one multimodal Gemini call
         const res = await fetch("/api/uploads/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -669,27 +587,42 @@ export default function ChatPage() {
             textMessage: trimmed || undefined,
           }),
         });
-        const json = await res.json() as { data?: UploadResponseData; error?: string };
+        const json = (await res.json()) as { data?: UploadResponseData; error?: string };
         if (!res.ok || !json.data) {
-          setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Image upload failed." }]);
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: json.error ?? "Image upload failed." },
+          ]);
           return;
         }
         handleUploadResult(json.data);
       } else if (trimmed) {
-        // Text-only goes to the chat endpoint
         const res = await fetch("/api/chat/message", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: trimmed, threadId }),
         });
-        const json = await res.json() as { data?: { thread: { id: string }; assistantMessage: { content: string }; actions: AiAction[] }; error?: string };
+        const json = (await res.json()) as {
+          data?: {
+            thread: { id: string };
+            assistantMessage: { content: string };
+            actions: AiAction[];
+          };
+          error?: string;
+        };
         if (!res.ok || !json.data) {
-          setMessages((prev) => [...prev, { role: "assistant", content: json.error ?? "Something went wrong." }]);
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: json.error ?? "Something went wrong." },
+          ]);
           return;
         }
         const { thread, assistantMessage, actions } = json.data;
         setThreadId(thread.id);
-        setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage.content, actions }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: assistantMessage.content, actions },
+        ]);
       }
     } catch {
       setMessages((prev) => [
@@ -709,85 +642,52 @@ export default function ChatPage() {
     }
   }
 
+  const hasContent = input.trim().length > 0 || pendingImages.length > 0;
+  const showEmptyState = messages.length === 0 && !loadingHistory;
+
   return (
-    <div className="flex h-screen flex-col bg-zinc-50 font-sans">
+    <main className="min-h-screen bg-[#101010] px-5 pb-[180px] pt-8 font-sans text-[#F5F5F5]">
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
-      {/* Header */}
-      <header className="border-b border-zinc-200 bg-white px-6 py-4 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-white text-sm font-bold">
-          AI
-        </div>
-        <div>
-          <p className="font-semibold text-zinc-900 text-sm">Gemini Chat Parser — Test Page</p>
-          <p className="text-xs text-zinc-400">
-            {threadId ? `Thread: ${threadId.slice(0, 8)}…` : "New thread"}
+
+      {showEmptyState ? (
+        <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
+          <div className="h-32 w-32 rounded-2xl bg-zinc-700/40" />
+          <p
+            className="italic"
+            style={{
+              fontFamily: '"Cormorant Garamond"',
+              fontSize: "28px",
+              fontWeight: 400,
+              lineHeight: "normal",
+            }}
+          >
+            Got any thoughts for today?
           </p>
         </div>
-        {threadId && (
-          <button
-            onClick={() => { setThreadId(undefined); setMessages([]); setLoadingHistory(false); }}
-            className="ml-auto text-xs text-zinc-400 hover:text-zinc-700 px-3 py-1 rounded-md border border-zinc-200 hover:border-zinc-300 transition-colors"
-          >
-            New thread
-          </button>
-        )}
-      </header>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-            {loadingHistory ? (
-              <p className="text-zinc-300 text-sm">Loading conversation…</p>
-            ) : (
-              <>
-                <div>
-                  <p className="text-zinc-400 text-sm mb-1">Try describing a task or event in plain English.</p>
-                  <p className="text-zinc-300 text-xs">Parsed AI actions will appear below each response.</p>
-                </div>
-                <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                  {EXAMPLE_PROMPTS.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => void send(p)}
-                      className="text-xs bg-white border border-zinc-200 hover:border-violet-300 hover:text-violet-700 text-zinc-600 px-3 py-1.5 rounded-full transition-colors"
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {messages.map((entry, i) => (
-          <Message
-            key={i}
-            entry={entry}
-            onConfirm={(actionId, inputPayload) => void updateAction(actionId, "confirm", inputPayload)}
-            onCancel={(actionId) => void updateAction(actionId, "cancel")}
-            pendingActionIds={pendingActionIds}
-            onImageClick={setLightboxSrc}
-          />
-        ))}
-
-        {loading && (
-          <div className="flex items-start gap-2">
-            <div className="bg-zinc-100 rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm text-zinc-400">
-              <span className="inline-flex gap-1">
-                <span className="animate-bounce" style={{ animationDelay: "0ms" }}>·</span>
-                <span className="animate-bounce" style={{ animationDelay: "150ms" }}>·</span>
-                <span className="animate-bounce" style={{ animationDelay: "300ms" }}>·</span>
-              </span>
+      ) : (
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+          {loadingHistory && (
+            <p className="py-6 text-center text-sm text-[#A0A0A0]">Loading conversation…</p>
+          )}
+          {messages.map((entry, i) => (
+            <Message
+              key={i}
+              entry={entry}
+              onConfirm={(actionId) => void updateAction(actionId, "confirm")}
+              onCancel={(actionId) => void updateAction(actionId, "cancel")}
+              pendingActionIds={pendingActionIds}
+              onImageClick={setLightboxSrc}
+            />
+          ))}
+          {loading && (
+            <div className="flex items-start">
+              <p className="text-sm italic text-[#A0A0A0]">Thinking…</p>
             </div>
-          </div>
-        )}
+          )}
+          <div ref={bottomRef} />
+        </div>
+      )}
 
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Hidden file input for image uploads */}
       <input
         ref={imageInputRef}
         type="file"
@@ -801,95 +701,105 @@ export default function ChatPage() {
         }}
       />
 
-      {/* Input */}
-      <div className="border-t border-zinc-200 bg-white px-4 pt-3 pb-3">
-        {/* Pending image previews */}
-        {pendingImages.length > 0 && (
-          <div className="flex flex-wrap gap-2 max-w-3xl mx-auto mb-2">
-            {pendingImages.map((img, i) => (
-              <div key={i} className="relative group">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.dataUrl}
-                  alt={`Image ${i + 1}`}
-                  className="h-16 w-16 rounded-xl object-cover border border-zinc-200 cursor-zoom-in"
-                  onClick={() => setLightboxSrc(img.dataUrl)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
-                  className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-800 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="flex items-end gap-2 max-w-3xl mx-auto">
-          {/* Image button */}
-          <button
-            onClick={() => imageInputRef.current?.click()}
-            disabled={loading || isRecording}
-            title="Upload image"
-            className="shrink-0 h-[42px] w-[42px] rounded-xl border border-zinc-200 hover:border-violet-300 disabled:opacity-40 text-zinc-500 hover:text-violet-600 flex items-center justify-center transition-colors"
+      {/* Input pill — fixed above navbar */}
+      <div className="fixed inset-x-0 bottom-[88px] z-30 px-5">
+        <div className="mx-auto max-w-2xl">
+          {pendingImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {pendingImages.map((img, i) => (
+                <div key={i} className="group relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.dataUrl}
+                    alt={`Image ${i + 1}`}
+                    className="h-16 w-16 cursor-zoom-in rounded-xl border border-white/10 object-cover"
+                    onClick={() => setLightboxSrc(img.dataUrl)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-800 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div
+            className="flex items-end gap-2 rounded-3xl px-3 py-2 backdrop-blur-md"
+            style={{
+              backgroundColor: "rgba(110, 110, 110, 0.20)",
+              boxShadow:
+                "inset 0 0 0 1px rgba(0, 0, 0, 0.6), inset 1px 1px 0px 0px rgba(185, 185, 185), inset -1px -1px 0px 0px rgb(185, 185, 185)",
+            }}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <rect x="1" y="3" width="14" height="10" rx="1.5" />
-              <circle cx="5.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-              <path d="M1 11l3.5-3.5 2.5 2.5 2-2 4 4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-
-          {/* Mic button */}
-          <button
-            onClick={isRecording ? stopRecording : () => void startRecording()}
-            disabled={loading && !isRecording}
-            title={isRecording ? "Stop recording" : "Record voice"}
-            className={`shrink-0 h-[42px] w-[42px] rounded-xl border flex items-center justify-center transition-colors ${
-              isRecording
-                ? "bg-red-500 border-red-500 text-white hover:bg-red-600"
-                : "border-zinc-200 hover:border-violet-300 text-zinc-500 hover:text-violet-600 disabled:opacity-40"
-            }`}
-          >
-            {isRecording ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <rect x="3" y="3" width="10" height="10" rx="1.5" />
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={loading || isRecording}
+              aria-label="Upload image"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#A0A0A0] transition-colors hover:text-[#F5F5F5] disabled:opacity-40"
+            >
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="1" y="3" width="14" height="10" rx="1.5" />
+                <circle cx="5.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+                <path d="M1 11l3.5-3.5 2.5 2.5 2-2 4 4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
+            </button>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="How are you feeling today?"
+              rows={1}
+              disabled={loading || isRecording}
+              className="flex-1 resize-none bg-transparent px-1 py-2 text-sm text-[#F5F5F5] placeholder:text-[#A0A0A0] outline-none disabled:opacity-50"
+              style={{ lineHeight: "1.5", maxHeight: TEXTAREA_MAX_HEIGHT }}
+            />
+            {hasContent ? (
+              <button
+                type="button"
+                onClick={() => void send(input)}
+                disabled={loading || isRecording}
+                aria-label="Send"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F5F5F5] text-[#101010] transition-opacity disabled:opacity-50"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14" />
+                  <path d="M13 5l7 7-7 7" />
+                </svg>
+              </button>
             ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="5.5" y="1" width="5" height="8" rx="2.5" />
-                <path d="M2 8a6 6 0 0012 0" strokeLinecap="round" />
-                <line x1="8" y1="14" x2="8" y2="11" strokeLinecap="round" />
-              </svg>
+              <button
+                type="button"
+                onClick={isRecording ? stopRecording : () => void startRecording()}
+                disabled={loading && !isRecording}
+                aria-label={isRecording ? "Stop recording" : "Speak"}
+                className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
+                  isRecording
+                    ? "bg-red-500 text-white"
+                    : "bg-white/10 text-[#F5F5F5] hover:bg-white/15"
+                }`}
+              >
+                {isRecording ? (
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="3" y="3" width="10" height="10" rx="1.5" />
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="2" width="6" height="12" rx="3" />
+                    <path d="M5 11a7 7 0 0 0 14 0" />
+                    <line x1="12" y1="18" x2="12" y2="22" />
+                  </svg>
+                )}
+                {isRecording ? "Stop" : "Speak"}
+              </button>
             )}
-          </button>
-
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Describe a task, event, or say 'plan my day'…"
-            rows={1}
-            disabled={loading || isRecording}
-            className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-800 placeholder-zinc-400 outline-none focus:border-violet-400 focus:bg-white transition-colors disabled:opacity-50 min-h-[42px] max-h-32"
-            style={{ lineHeight: "1.5" }}
-          />
-          <button
-            onClick={() => void send(input)}
-            disabled={loading || isRecording || (!input.trim() && pendingImages.length === 0)}
-            className="shrink-0 h-[42px] w-[42px] rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-zinc-200 text-white disabled:text-zinc-400 flex items-center justify-center transition-colors"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1.5 1.5l13 6.5-13 6.5V9.5l9-1.5-9-1.5V1.5z" />
-            </svg>
-          </button>
+          </div>
         </div>
-        <p className="text-center text-xs text-zinc-300 mt-2">
-          {isRecording ? "Recording… click stop when done" : "Enter to send · Shift+Enter for newline"}
-        </p>
       </div>
-    </div>
+    </main>
   );
 }

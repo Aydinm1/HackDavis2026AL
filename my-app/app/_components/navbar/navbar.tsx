@@ -16,11 +16,18 @@ const navItems = [
 const chatItem = { href: "/chat", Icon: ChatIcon };
 
 const baseItemClasses = 
-  "relative inline-flex items-center justify-center p-2.5 px-3.5 mx-0.5 rounded-full text-[#D9D9D9] transition-colors duration-300 ease-out z-10";
+  "relative inline-flex items-center justify-center p-2.5 px-3 mx-0.5 rounded-full text-[#D9D9D9] transition-colors duration-300 ease-out z-10";
 
-// Split the classes so we can remove the 'transition-all' from the motion element
 const navContainerBase = 
-  "fixed bottom-5 border p-1.5 flex items-center rounded-full shadow-[inset_0_1px_2px_rgba(255,255,255,0.1)] z-50 backdrop-blur-md";
+  "fixed bottom-5 p-1 flex items-center rounded-full z-50 backdrop-blur-md";
+
+const pillBackground = "rgba(110, 110, 110, 0.20)";
+
+const directionalBorderShadow = `
+  inset 0 0 0 1px rgba(0, 0, 0, 0.6),
+  inset 1px 1px 0px 0px rgba(185, 185, 185),
+  inset -1px -1px 0px 0px rgb(185, 185, 185)
+`;
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -28,8 +35,11 @@ export default function Navbar() {
 
   return (
     <>
-      {/* Left Pill - Keep transition-all here if you want the border to animate on load */}
-      <nav className={`${navContainerBase} left-5 gap-3.5 border-white/10 bg-[rgba(110,110,110,0.20)] transition-all duration-300`}>
+      {/* Left Pill */}
+      <nav
+        className={`${navContainerBase} left-5 gap-3.5 transition-all duration-300`}
+        style={{ boxShadow: directionalBorderShadow, backgroundColor: pillBackground }}
+      >
         <AnimatePresence initial={false}>
           {navItems.map(({ href, Icon }) => (
             <NavItem 
@@ -43,27 +53,27 @@ export default function Navbar() {
         </AnimatePresence>
       </nav>
 
-      {/* Right Pill - REMOVED transition-all here so Framer Motion is instant */}
+      {/* Right Pill */}
       <motion.div 
         initial={false}
         animate={{ 
-          backgroundColor: isChatActive ? "rgba(217, 217, 217, 0.20)" : "rgba(110, 110, 110, 0.20)",
-          borderColor: isChatActive ? "rgba(255, 255, 255, 0.3)" : "rgba(255, 255, 255, 0.1)"
+          backgroundColor: isChatActive ? pillBackground : pillBackground,
         }}
         transition={{ 
           type: "spring", 
           stiffness: 300, 
           damping: 30 
         }}
+        style={{ boxShadow: directionalBorderShadow }}
         className={`${navContainerBase} right-5`}
       >
         <NavItem 
-            href={chatItem.href} 
-            Icon={chatItem.Icon} 
-            isActive={isChatActive}
-            sharedLayoutId="chat-nav-bubble"
-            suppressBubble 
-          />
+          href={chatItem.href} 
+          Icon={chatItem.Icon} 
+          isActive={isChatActive}
+          sharedLayoutId="chat-nav-bubble"
+          suppressBubble 
+        />
       </motion.div>
     </>
   );
@@ -81,14 +91,13 @@ function NavItem({ href, Icon, isActive, sharedLayoutId, suppressBubble = false 
   return (
     <Link 
       href={href} 
-      className={`${baseItemClasses} ${isActive ? "" : "text-[#D9D9D9]/50 hover:text-[#D9D9D9]"}`}
+      className={`${baseItemClasses} ${isActive ? "px-4" : "text-[#D9D9D9]/50 hover:text-[#D9D9D9]"}`}
     >
       <AnimatePresence>
         {isActive && !suppressBubble && (
           <motion.div
             layoutId={sharedLayoutId}
-            // 3. SELECTED BUBBLE BACKGROUND: Applied to the sliding layout indicator
-            className="absolute top-0 bottom-0 -left-1 -right-1 bg-[rgba(217,217,217,0.20)] border border-white/30 rounded-full"
+            className="absolute top-1 bottom-0 -left-0 -right-0 bg-[rgba(217,217,217,0.20)]  rounded-full"
             style={{ boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.1)' }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

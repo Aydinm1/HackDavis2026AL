@@ -393,8 +393,8 @@ async function main() {
       severity: "caution",
       confidenceScore: 0.84,
       sourceData: {
-        energyScore: 3,
-        stressScore: 6,
+        energyScore: 1,
+        stressScore: 1,
         checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
         checkinTimeline: [
           { id: "demo_checkin_log_2026_05_11_morning", energyScore: 5, stressScore: 4 },
