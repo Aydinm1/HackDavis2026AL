@@ -23,8 +23,14 @@ export function parseDashboardDate(searchParams: URLSearchParams): ValidationRes
     return { ok: false, error: "date must be in YYYY-MM-DD format." };
   }
 
-  const start = new Date(`${date}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime()) || start.toISOString().slice(0, 10) !== date) {
+  const [year, month, day] = date.split("-").map(Number);
+  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (
+    Number.isNaN(start.getTime()) ||
+    start.getFullYear() !== year ||
+    start.getMonth() !== month - 1 ||
+    start.getDate() !== day
+  ) {
     return { ok: false, error: "date must be a valid calendar date." };
   }
 

@@ -508,6 +508,25 @@ function normalizeCreateEventAction(action: MockParsedAction, originalText: stri
   };
 }
 
+function normalizeGenerateScheduleAction(action: MockParsedAction, originalText: string): MockParsedAction {
+  if (action.actionType !== "GENERATE_SCHEDULE") {
+    return action;
+  }
+
+  return {
+    ...action,
+    requiresConfirmation: true,
+    ambiguous: false,
+    inputPayload: {
+      ...action.inputPayload,
+      rawText: typeof action.inputPayload.rawText === "string" ? action.inputPayload.rawText : originalText,
+      trigger: typeof action.inputPayload.trigger === "string" ? action.inputPayload.trigger : "chat",
+    },
+    assistantSummary:
+      "I can generate a schedule proposal from your current tasks, fixed events, preferences, and latest check-in. Please confirm before I create new scheduled blocks.",
+  };
+}
+
 function addImplicitStudyActionIfNeeded(actions: MockParsedAction[], originalText: string) {
   if (!isImplicitStudyTask(originalText) || actions.some((action) => action.actionType === "CREATE_TASK")) {
     return actions;
@@ -550,7 +569,10 @@ function addImplicitEventActionIfNeeded(actions: MockParsedAction[], originalTex
 
 function normalizeParsedActions(actions: MockParsedAction[], originalText: string) {
   return addImplicitEventActionIfNeeded(addImplicitStudyActionIfNeeded(actions, originalText), originalText).map((action) =>
-    normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+    normalizeGenerateScheduleAction(
+      normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+      originalText,
+    ),
   );
 }
 

@@ -234,12 +234,12 @@ export function parseMockChatMessage(content: string): MockParsedAction[] {
   if (/\b(schedule|plan my day|generate schedule)\b/i.test(text)) {
     actions.push({
       actionType: "GENERATE_SCHEDULE",
-      requiresConfirmation: false,
+      requiresConfirmation: true,
       ambiguous: false,
       inputPayload: {
         rawText: text,
       },
-      assistantSummary: "I can generate a simple schedule suggestion from your current tasks and events.",
+      assistantSummary: "I can generate a schedule proposal from your current tasks, events, preferences, and latest check-in. Please confirm before I create new scheduled blocks.",
     });
   }
 

@@ -170,7 +170,7 @@ Rules:
 - Return an empty array [] if the message has no actionable intent (e.g. questions, greetings, casual chat).
 - Return an empty array [] for read-only questions like "what do I have to do Monday", "what is my highest priority task Monday", or "show my top task Friday". Do not turn those into GENERATE_SCHEDULE.
 - Set ambiguous: true if required fields for the action type are missing.
-- Set requiresConfirmation: true for UPDATE_TASK and ambiguous actions.
+- Set requiresConfirmation: true for UPDATE_TASK, GENERATE_SCHEDULE, and ambiguous actions.
 - Write a short, friendly assistantSummary confirming or clarifying the action.
 - Only extract actions that are clearly intended. Do not hallucinate tasks.`;
 

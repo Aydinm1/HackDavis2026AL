@@ -50,6 +50,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Tasks page loads Prisma data and supports create, edit, and soft-delete.
 - [x] Calendar page loads Prisma data and supports soft-delete for calendar events.
 - [x] Chat can answer read-only weekday priority questions, such as "what is my highest priority task Monday", without creating schedule actions.
+- [x] Chat treats schedule generation as a confirmable AI action before creating scheduled blocks.
+- [x] Root page `/` renders the Today dashboard by default.
 - [x] Basic API documentation in `docs/API.md`.
 - [x] Validation tests in `tests/api-validation.test.ts`.
 - [x] Basic frontend placeholder pages.
@@ -263,25 +265,25 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Frontend
 
-- [ ] Chat page image upload should call `/api/uploads/image`.
-- [ ] Chat page voice recording should call `/api/uploads/voice`.
+- [x] Chat page image upload should call `/api/uploads/image`.
+- [x] Chat page voice recording should call `/api/uploads/voice`.
 - [ ] Show transcript for voice.
-- [ ] Show parsed action cards.
-- [ ] Add confirm/cancel buttons for proposed actions.
+- [x] Show parsed action cards.
+- [x] Add confirm/cancel buttons for proposed actions.
 
 ## Priority 3: Frontend Demo Flow
 
 ### Dashboard Page
 
-- [ ] Wire dashboard page to `GET /api/dashboard/today`.
-- [ ] Show:
-  - [ ] daily check-in
-  - [ ] today scheduled blocks
-  - [ ] top tasks
-  - [ ] next calendar event
-  - [ ] AI insights
+- [x] Wire dashboard page to dashboard service data.
+- [x] Show:
+  - [x] daily check-in
+  - [x] today scheduled blocks
+  - [x] top tasks
+  - [x] next calendar event
+  - [x] AI insights
 - [ ] Add check-in form.
-- [ ] Show lighter-plan insight when stress is high or energy is low.
+- [x] Show lighter-plan/recovery insight from stored AI insights when available.
 
 ### Tasks Page
 
@@ -300,18 +302,19 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Wire to seeded schedule data.
 - [x] Show calendar events and scheduled blocks together.
 - [x] Add delete control for calendar events.
-- [ ] Add generate schedule button.
+- [x] Add generate schedule button.
 - [ ] Add complete/skip/move controls for blocks.
 - [x] Show block status and scheduling reason.
 
 ### Chat Page
 
 - [ ] Load thread messages from API.
-- [ ] Send chat messages to `/api/chat/message`.
+- [x] Send chat messages to `/api/chat/message`.
 - [x] Show AiAction cards.
 - [x] Add confirm/cancel buttons.
 - [x] Add edit payload before confirm.
 - [x] Answer read-only task priority questions using DB data without creating AiAction rows.
+- [x] Propose schedule generation through chat before running the scheduler.
 - [ ] Support image and voice upload flow.
 
 ### Upload Confirmation
@@ -371,8 +374,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ## Demo Script Readiness
 
-- [ ] Open Today dashboard with seeded data.
-- [ ] Show existing events and daily check-in.
+- [x] Open Today dashboard with seeded data.
+- [x] Show existing events and daily check-in.
 - [ ] Add task through chat:
   - [ ] "Add a chem midterm study task for Thursday, high priority, 3 hours."
 - [ ] Show task appears in task list.
@@ -390,10 +393,10 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ## Testing Checklist
 
-- [ ] Keep passing:
-  - [ ] `npm run test`
-  - [ ] `npm run lint`
-  - [ ] `npm run typecheck`
+- [x] Keep passing:
+  - [x] `npm run test`
+  - [x] `npm run lint`
+  - [x] `npm run typecheck`
 - [ ] Add tests for:
   - [x] schedule generation conflict avoidance
   - [x] insight endpoint validation
@@ -426,12 +429,11 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ## Recommended Next Build Order
 
-1. [ ] Wire dashboard page to APIs.
-2. [ ] Add generate schedule controls to the Calendar / Planner page.
-3. [ ] Add complete controls for task cards and scheduled blocks.
-4. [ ] Load existing chat thread history from APIs.
-5. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
-6. [ ] Finish voice/image Gemini flow and confirmation cards.
-7. [ ] Improve task breakdowns for large tasks.
-8. [ ] Add real Google Calendar OAuth/import.
-9. [ ] Add metrics queries for check-in, completion, and AI action success.
+1. [ ] Add complete controls for task cards and scheduled blocks.
+2. [ ] Add daily check-in form to dashboard.
+3. [ ] Load existing chat thread history from APIs.
+4. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
+5. [ ] Finish voice/image Gemini flow and confirmation cards.
+6. [ ] Improve task breakdowns for large tasks.
+7. [ ] Add real Google Calendar OAuth/import.
+8. [ ] Add metrics queries for check-in, completion, and AI action success.

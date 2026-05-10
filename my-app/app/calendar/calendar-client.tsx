@@ -15,6 +15,24 @@ export type CalendarItemViewModel = {
   reason: string | null;
 };
 
+type GeneratedScheduleBlock = {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  schedulingReason: string | null;
+  task: { title: string } | null;
+  taskBreakdown: { title: string } | null;
+};
+
+type UnscheduledTask = {
+  taskId: string;
+  title: string;
+  reason: string;
+  remainingMinutes: number;
+};
+
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -42,10 +60,32 @@ function eventKindClass(kind: "event" | "block", status?: string) {
   return "border-violet-200 bg-violet-50";
 }
 
-export function CalendarClient({ initialItems }: { initialItems: CalendarItemViewModel[] }) {
+function generatedBlockToItem(block: GeneratedScheduleBlock): CalendarItemViewModel {
+  return {
+    id: block.id,
+    kind: "block",
+    title: block.title,
+    subtitle: block.task?.title ?? block.taskBreakdown?.title ?? "Scheduled work block",
+    startTime: block.startTime,
+    endTime: block.endTime,
+    status: block.status,
+    taskTitle: block.task?.title ?? null,
+    reason: block.schedulingReason,
+  };
+}
+
+export function CalendarClient({
+  initialItems,
+  scheduleRange,
+}: {
+  initialItems: CalendarItemViewModel[];
+  scheduleRange: { start: string; end: string };
+}) {
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [unscheduledTasks, setUnscheduledTasks] = useState<UnscheduledTask[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const groupedItems = useMemo(
@@ -79,11 +119,78 @@ export function CalendarClient({ initialItems }: { initialItems: CalendarItemVie
     }
   }
 
+  async function generateSchedule() {
+    setError(null);
+    setUnscheduledTasks([]);
+    setIsGenerating(true);
+
+    try {
+      const response = await fetch("/api/schedule/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: scheduleRange.start,
+          end: scheduleRange.end,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to generate schedule.");
+
+      const newBlocks = (body.data?.scheduledBlocks ?? []) as GeneratedScheduleBlock[];
+      const nextBlockItems = newBlocks.map(generatedBlockToItem);
+      setItems((current) => {
+        const existingKeys = new Set(current.map((item) => `${item.kind}-${item.id}`));
+        const merged = [
+          ...current,
+          ...nextBlockItems.filter((item) => !existingKeys.has(`${item.kind}-${item.id}`)),
+        ];
+
+        return merged.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+      });
+      setUnscheduledTasks((body.data?.unscheduledTasks ?? []) as UnscheduledTask[]);
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to generate schedule.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   return (
     <section className="grid gap-5">
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-zinc-950">Planning agent</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Generate proposed work blocks around fixed calendar events for this demo week.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={generateSchedule}
+          disabled={isGenerating}
+          className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+        >
+          {isGenerating ? "Generating..." : "Generate Schedule"}
+        </button>
+      </div>
+
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           {error}
+        </div>
+      )}
+
+      {unscheduledTasks.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <h2 className="font-semibold">Could not fit everything</h2>
+          <ul className="mt-2 grid gap-2">
+            {unscheduledTasks.map((task) => (
+              <li key={task.taskId}>
+                <span className="font-medium">{task.title}</span>: {task.reason} ({task.remainingMinutes} min left)
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

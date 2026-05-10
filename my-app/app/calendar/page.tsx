@@ -82,7 +82,13 @@ export default async function Calendar() {
           </div>
         </header>
 
-        <CalendarClient initialItems={items} />
+        <CalendarClient
+          initialItems={items}
+          scheduleRange={{
+            start: demoRange.start.toISOString(),
+            end: demoRange.end.toISOString(),
+          }}
+        />
       </div>
     </main>
   );

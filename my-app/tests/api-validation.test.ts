@@ -327,7 +327,10 @@ test("dashboard date validation accepts only valid YYYY-MM-DD dates", () => {
   assert.equal(valid.ok, true);
   if (valid.ok) {
     assert.equal(valid.value.date, "2026-05-11");
-    assert.equal(valid.value.start.toISOString(), "2026-05-11T00:00:00.000Z");
+    assert.equal(valid.value.start.getFullYear(), 2026);
+    assert.equal(valid.value.start.getMonth(), 4);
+    assert.equal(valid.value.start.getDate(), 11);
+    assert.equal(valid.value.start.getHours(), 0);
   }
 
   assert.equal(invalidFormat.ok, false);
@@ -420,6 +423,14 @@ test("mock parser requires confirmation or clarification for updates", () => {
   assert.equal(moveActions[0]?.ambiguous, true);
 });
 
+test("mock parser proposes schedule generation before creating blocks", () => {
+  const actions = parseMockChatMessage("plan my day");
+
+  assert.equal(actions[0]?.actionType, "GENERATE_SCHEDULE");
+  assert.equal(actions[0]?.requiresConfirmation, true);
+  assert.match(actions[0]?.assistantSummary ?? "", /confirm/i);
+});
+
 test("voice upload validation requires audioData and mimeType", () => {
   const valid = validateVoiceUploadBody({ audioData: "base64string==", mimeType: "audio/webm" });
   const missingAudio = validateVoiceUploadBody({ mimeType: "audio/webm" });
@@ -485,7 +496,7 @@ test("validateGeminiResponse passes through GENERATE_SCHEDULE with no required f
   const raw = [
     {
       actionType: "GENERATE_SCHEDULE",
-      requiresConfirmation: false,
+      requiresConfirmation: true,
       ambiguous: false,
       assistantSummary: "Generating your schedule.",
       inputPayload: { rawText: "plan my day" },
@@ -496,6 +507,7 @@ test("validateGeminiResponse passes through GENERATE_SCHEDULE with no required f
 
   assert.equal(result.length, 1);
   assert.equal(result[0]?.actionType, "GENERATE_SCHEDULE");
+  assert.equal(result[0]?.requiresConfirmation, true);
 });
 
 test("validateGeminiResponse skips entries missing actionType", () => {
