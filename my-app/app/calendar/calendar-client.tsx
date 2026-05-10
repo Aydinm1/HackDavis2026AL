@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   CreateSheet,
   buildPayload,
@@ -25,6 +25,12 @@ export type CalendarItemViewModel = {
   endTime: string;
   priority: number | null;
   cognitiveLoad: number | null;
+};
+
+type EventFormState = {
+  title: string;
+  startTime: string;
+  endTime: string;
 };
 
 type Level = "high" | "medium" | "low";
@@ -94,11 +100,24 @@ function formatGapHours(minutes: number) {
   return rounded.toString();
 }
 
-function EventCard({ item }: { item: CalendarItemViewModel }) {
+function toDatetimeLocal(iso: string) {
+  const d = new Date(iso);
+  const offset = d.getTimezoneOffset() * 60_000;
+  return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function EventCard({
+  item,
+  onEdit,
+}: {
+  item: CalendarItemViewModel;
+  onEdit?: () => void;
+}) {
   const pLevel = priorityLevel(item.priority);
   const dLevel = difficultyLevel(item.cognitiveLoad);
-  return (
-    <div className="rounded-2xl border border-white/5 p-4">
+
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <p className="font-semibold text-[#F5F5F5]">{item.title}</p>
         <div className="caption shrink-0 text-[10px] text-[#A0A0A0]">
@@ -111,7 +130,123 @@ function EventCard({ item }: { item: CalendarItemViewModel }) {
           <Indicator level={dLevel} suffix="Difficulty" />
         </div>
       )}
-    </div>
+    </>
+  );
+
+  if (onEdit) {
+    return (
+      <button
+        type="button"
+        onClick={onEdit}
+        className="w-full rounded-2xl border border-white/5 p-4 text-left transition-colors hover:border-white/10 hover:bg-white/[0.04]"
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return <div className="rounded-2xl border border-white/5 p-4">{inner}</div>;
+}
+
+function EventSheet({
+  form,
+  setForm,
+  onSave,
+  onDelete,
+  onClose,
+  busy,
+  error,
+}: {
+  form: EventFormState;
+  setForm: (f: EventFormState) => void;
+  onSave: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-end justify-center"
+    >
+      <div className="absolute inset-0 cursor-default bg-black/60" onClick={onClose} />
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        drag="y"
+        dragConstraints={{ top: 0 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 120 || info.velocity.y > 600) onClose();
+        }}
+        className="relative z-10 w-full max-w-md rounded-t-3xl bg-[#1a1f1a] px-5 pt-3 pb-20 shadow-2xl"
+      >
+        <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-white/30" />
+
+        <h2 className="mb-5 text-base font-semibold text-[#F5F5F5]">Edit Event</h2>
+
+        {error && (
+          <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#A0A0A0]">Title</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="rounded-xl bg-[#242924] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#A0A0A0]">Start</label>
+            <input
+              type="datetime-local"
+              value={form.startTime}
+              onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+              className="rounded-xl bg-[#242924] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#A0A0A0]">End</label>
+            <input
+              type="datetime-local"
+              value={form.endTime}
+              onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+              className="rounded-xl bg-[#242924] px-4 py-3 text-sm text-[#F5F5F5] outline-none focus:ring-1 focus:ring-white/20"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-3">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={busy}
+            className="flex-1 rounded-xl bg-[#2d3b2d] py-3 text-sm font-medium text-[#F5F5F5] disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={busy}
+            className="flex-1 rounded-xl bg-red-900/40 py-3 text-sm font-medium text-red-300 disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -129,10 +264,18 @@ export function CalendarClient({
   selectedDayName: string;
 }) {
   const router = useRouter();
+
+  // Task create sheet state
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<TaskFormState>(defaultFormState);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Event edit sheet state
+  const [editingEvent, setEditingEvent] = useState<CalendarItemViewModel | null>(null);
+  const [eventForm, setEventForm] = useState<EventFormState>({ title: "", startTime: "", endTime: "" });
+  const [eventBusy, setEventBusy] = useState(false);
+  const [eventError, setEventError] = useState<string | null>(null);
 
   const sortedItems = useMemo(
     () => [...initialItems].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime)),
@@ -201,6 +344,62 @@ export function CalendarClient({
       setError(caught instanceof Error ? caught.message : "Failed to create task.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function openEventEdit(item: CalendarItemViewModel) {
+    setEventError(null);
+    setEventForm({
+      title: item.title,
+      startTime: toDatetimeLocal(item.startTime),
+      endTime: toDatetimeLocal(item.endTime),
+    });
+    setEditingEvent(item);
+  }
+
+  function closeEventEdit() {
+    setEditingEvent(null);
+  }
+
+  async function submitEventEdit() {
+    if (!editingEvent) return;
+    setEventError(null);
+    setEventBusy(true);
+    try {
+      const res = await fetch(`/api/calendar/events/${editingEvent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: eventForm.title || undefined,
+          startTime: eventForm.startTime ? new Date(eventForm.startTime).toISOString() : undefined,
+          endTime: eventForm.endTime ? new Date(eventForm.endTime).toISOString() : undefined,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Failed to update event.");
+      closeEventEdit();
+      router.refresh();
+    } catch (e) {
+      setEventError(e instanceof Error ? e.message : "Failed to update event.");
+    } finally {
+      setEventBusy(false);
+    }
+  }
+
+  async function deleteEvent() {
+    if (!editingEvent) return;
+    if (!window.confirm(`Delete "${editingEvent.title}"?`)) return;
+    setEventBusy(true);
+    try {
+      const res = await fetch(`/api/calendar/events/${editingEvent.id}`, { method: "DELETE" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Failed to delete event.");
+      closeEventEdit();
+      router.refresh();
+    } catch (e) {
+      setEventError(e instanceof Error ? e.message : "Failed to delete event.");
+    } finally {
+      setEventBusy(false);
     }
   }
 
@@ -297,7 +496,11 @@ export function CalendarClient({
                 <div className="pt-3 text-sm text-[#A0A0A0]">{formatHourLabel(h)}</div>
                 <div className="flex flex-col gap-4">
                   {eventsAtHour.map((it) => (
-                    <EventCard key={`${it.kind}-${it.id}`} item={it} />
+                    <EventCard
+                      key={`${it.kind}-${it.id}`}
+                      item={it}
+                      onEdit={it.kind === "event" ? () => openEventEdit(it) : undefined}
+                    />
                   ))}
                   {gapMinutes !== undefined && (
                     <p className="py-3 text-center text-sm text-[#A0A0A0]">
@@ -319,6 +522,20 @@ export function CalendarClient({
             onSubmit={submitCreate}
             onCancel={closeForm}
             busy={busy}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editingEvent && (
+          <EventSheet
+            form={eventForm}
+            setForm={setEventForm}
+            onSave={submitEventEdit}
+            onDelete={deleteEvent}
+            onClose={closeEventEdit}
+            busy={eventBusy}
+            error={eventError}
           />
         )}
       </AnimatePresence>
