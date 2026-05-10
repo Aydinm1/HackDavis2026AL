@@ -1,5 +1,7 @@
 "use client";
 
+import { EnergyStressShape } from "@/app/_components/energy-stress-shape";
+
 interface Insight {
   type: string;
   title: string;
@@ -19,6 +21,8 @@ interface WeeklyAiInsightsProps {
   weeklyTasks: TaskDay[];
   averageEnergy: number;
   averageStress: number;
+  todayEnergy: number | null;
+  todayStress: number | null;
 }
 
 function pickSuggestion(insights: Insight[]) {
@@ -34,6 +38,8 @@ export default function WeeklyAiInsights({
   weeklyTasks,
   averageEnergy,
   averageStress,
+  todayEnergy,
+  todayStress,
 }: WeeklyAiInsightsProps) {
   const overview = insights[0];
   const suggestion = pickSuggestion(insights);
@@ -83,7 +89,16 @@ export default function WeeklyAiInsights({
       </div>
 
       <div className="flex flex-col items-center pb-6 pt-28">
-        <div className="h-11 w-14 rounded-[50%] bg-neutral-200" style={{ borderTopLeftRadius: "36px" }} />
+        <EnergyStressShape
+          energyScore={todayEnergy}
+          stressScore={todayStress}
+          className="h-14 w-16"
+          label={
+            todayEnergy && todayStress
+              ? `Energy ${todayEnergy} and stress ${todayStress}`
+              : "No check-in logged"
+          }
+        />
         <p className="mt-8 font-[var(--font-jakarta)] text-[19px] font-light leading-none text-white">call your mom!</p>
       </div>
     </section>

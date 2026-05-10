@@ -134,6 +134,8 @@ export default function EnergyInsightsClient() {
             weeklyTasks={data.weeklyTasks}
             averageEnergy={data.averageEnergy}
             averageStress={data.averageStress}
+            todayEnergy={data.todayEnergy}
+            todayStress={data.todayStress}
           />
         </section>
       </div>
