@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChatIcon, DailyIcon, CalendarIcon, StatisticsIcon, ToDoIcon } from "../icons/icons";
 
 const navItems = [
-  { href: "/dailyview", Icon: DailyIcon },
+  { href: "/", Icon: DailyIcon },
   { href: "/todolist", Icon: ToDoIcon },
   { href: "/calendar", Icon: CalendarIcon },
   { href: "/statistics", Icon: StatisticsIcon },
