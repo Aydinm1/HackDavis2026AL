@@ -10,6 +10,7 @@ import {
   defaultFormState,
   type TaskFormState,
 } from "@/app/todolist/tasks-client";
+import { EnergyStressShape } from "@/app/_components/energy-stress-shape";
 
 export type WeekDay = {
   letter: string;
@@ -277,12 +278,17 @@ export function CalendarClient({
   weekDays,
   monthLabel,
   selectedDayName,
+  checkin,
 }: {
   initialItems: CalendarItemViewModel[];
   selectedDate: string;
   weekDays: WeekDay[];
   monthLabel: string;
   selectedDayName: string;
+  checkin: {
+    energyScore: number | null;
+    stressScore: number | null;
+  };
 }) {
   const router = useRouter();
 
@@ -428,18 +434,30 @@ export function CalendarClient({
     <main className="min-h-screen bg-[#101010] px-5 py-8 pb-28 font-sans text-[#F5F5F5]">
       <div className="flex w-full flex-col gap-6">
         <header className="flex items-start justify-between">
-          <div>
+          <div className="flex items-start gap-2.5">
+            <EnergyStressShape
+              energyScore={checkin.energyScore}
+              stressScore={checkin.stressScore}
+              className="mt-1 h-9 w-9 shrink-0"
+              label={
+                checkin.energyScore && checkin.stressScore
+                  ? `Energy ${checkin.energyScore} and stress ${checkin.stressScore}`
+                  : "No check-in logged"
+              }
+            />
+            <div>
             <h1
               className="font-normal italic"
               style={{
                 fontFamily: '"Cormorant Garamond"',
-                fontSize: "48px",
+                fontSize: "38px",
                 lineHeight: "normal",
               }}
             >
               {selectedDayName}
             </h1>
-            <p className="mt-1 text-sm text-[#A0A0A0]">{monthLabel} ›</p>
+            <p className="mt-0.5 text-xs text-[#A0A0A0]">{monthLabel} ›</p>
+            </div>
           </div>
           <button
             type="button"

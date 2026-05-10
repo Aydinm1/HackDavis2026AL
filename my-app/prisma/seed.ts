@@ -14,6 +14,115 @@ const prisma = new PrismaClient({ adapter });
 
 const planningCycleId = "demo_cycle_2026_05_11";
 
+const demoCheckins = [
+  {
+    id: "demo_checkin_2026_05_09",
+    checkinDate: new Date("2026-05-09T00:00:00-07:00"),
+    energyScore: 6,
+    stressScore: 2,
+    availableCapacityMinutes: 180,
+    userNote: "Felt pretty good after finishing weekend errands.",
+    logs: [
+      {
+        id: "demo_checkin_log_2026_05_09_morning",
+        loggedAt: new Date("2026-05-09T09:30:00-07:00"),
+        energyScore: 6,
+        stressScore: 2,
+        availableCapacityMinutes: 180,
+        userNote: "Good energy and low stress after breakfast.",
+      },
+      {
+        id: "demo_checkin_log_2026_05_09_evening",
+        loggedAt: new Date("2026-05-09T19:45:00-07:00"),
+        energyScore: 5,
+        stressScore: 3,
+        availableCapacityMinutes: 90,
+        userNote: "Still okay, a little tired after chores.",
+      },
+    ],
+  },
+  {
+    id: "demo_checkin_2026_05_11",
+    checkinDate: new Date("2026-05-11T00:00:00-07:00"),
+    energyScore: 3,
+    stressScore: 6,
+    availableCapacityMinutes: 150,
+    userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
+    logs: [
+      {
+        id: "demo_checkin_log_2026_05_11_morning",
+        loggedAt: new Date("2026-05-11T08:15:00-07:00"),
+        energyScore: 5,
+        stressScore: 4,
+        availableCapacityMinutes: 210,
+        userNote: "Morning feels manageable before the lecture stack.",
+      },
+      {
+        id: "demo_checkin_log_2026_05_11_afternoon",
+        loggedAt: new Date("2026-05-11T15:20:00-07:00"),
+        energyScore: 3,
+        stressScore: 6,
+        availableCapacityMinutes: 150,
+        userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
+      },
+    ],
+  },
+  {
+    id: "demo_checkin_2026_05_12",
+    checkinDate: new Date("2026-05-12T00:00:00-07:00"),
+    energyScore: 5,
+    stressScore: 4,
+    availableCapacityMinutes: 210,
+    userNote: "Solid energy for project work before discussion section.",
+    logs: [
+      {
+        id: "demo_checkin_log_2026_05_12_morning",
+        loggedAt: new Date("2026-05-12T08:40:00-07:00"),
+        energyScore: 5,
+        stressScore: 4,
+        availableCapacityMinutes: 210,
+        userNote: "Solid energy for project work before discussion section.",
+      },
+    ],
+  },
+  {
+    id: "demo_checkin_2026_05_13",
+    checkinDate: new Date("2026-05-13T00:00:00-07:00"),
+    energyScore: 2,
+    stressScore: 7,
+    availableCapacityMinutes: 120,
+    userNote: "High stress before the lab report and chemistry review.",
+    logs: [
+      {
+        id: "demo_checkin_log_2026_05_13_afternoon",
+        loggedAt: new Date("2026-05-13T14:10:00-07:00"),
+        energyScore: 2,
+        stressScore: 7,
+        availableCapacityMinutes: 120,
+        userNote: "High stress before the lab report and chemistry review.",
+      },
+    ],
+  },
+  {
+    id: "demo_checkin_2026_05_14",
+    checkinDate: new Date("2026-05-14T00:00:00-07:00"),
+    energyScore: 4,
+    stressScore: 5,
+    availableCapacityMinutes: 160,
+    userNote: "Midterm day feels tense but manageable.",
+    logs: [
+      {
+        id: "demo_checkin_log_2026_05_14_morning",
+        loggedAt: new Date("2026-05-14T09:05:00-07:00"),
+        energyScore: 4,
+        stressScore: 5,
+        availableCapacityMinutes: 160,
+        userNote: "Midterm day feels tense but manageable.",
+      },
+    ],
+  },
+];
+
 const tasks = [
   {
     id: "demo_task_chem_midterm",
@@ -511,86 +620,71 @@ async function main() {
     },
   });
 
-  await prisma.dailyCheckin.upsert({
-    where: {
-      userId_checkinDate: {
-        userId: DEMO_USER_ID,
-        checkinDate: new Date("2026-05-11T00:00:00-07:00"),
+  const seededCheckinIds = new Map<string, string>();
+  const seededCheckinLogIds = new Map<string, string>();
+
+  for (const checkin of demoCheckins) {
+    const savedCheckin = await prisma.dailyCheckin.upsert({
+      where: {
+        userId_checkinDate: {
+          userId: DEMO_USER_ID,
+          checkinDate: checkin.checkinDate,
+        },
       },
-    },
-    update: {
-      planningCycleId,
-      energyScore: 3,
-      stressScore: 6,
-      availableCapacityMinutes: 150,
-      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
-    },
-    create: {
-      id: "demo_checkin_2026_05_11",
-      userId: DEMO_USER_ID,
-      planningCycleId,
-      checkinDate: new Date("2026-05-11T00:00:00-07:00"),
-      energyScore: 3,
-      stressScore: 6,
-      availableCapacityMinutes: 150,
-      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
-    },
-  });
+      update: {
+        planningCycleId,
+        energyScore: checkin.energyScore,
+        stressScore: checkin.stressScore,
+        availableCapacityMinutes: checkin.availableCapacityMinutes,
+        userNote: checkin.userNote,
+      },
+      create: {
+        id: checkin.id,
+        userId: DEMO_USER_ID,
+        planningCycleId,
+        checkinDate: checkin.checkinDate,
+        energyScore: checkin.energyScore,
+        stressScore: checkin.stressScore,
+        availableCapacityMinutes: checkin.availableCapacityMinutes,
+        userNote: checkin.userNote,
+      },
+    });
+    seededCheckinIds.set(checkin.id, savedCheckin.id);
 
-  await prisma.checkinLog.upsert({
-    where: { id: "demo_checkin_log_2026_05_11_morning" },
-    update: {
-      planningCycleId,
-      loggedAt: new Date("2026-05-11T08:15:00-07:00"),
-      energyScore: 5,
-      stressScore: 4,
-      availableCapacityMinutes: 210,
-      userNote: "Morning feels manageable before the lecture stack.",
-      source: "manual",
-    },
-    create: {
-      id: "demo_checkin_log_2026_05_11_morning",
-      userId: DEMO_USER_ID,
-      planningCycleId,
-      loggedAt: new Date("2026-05-11T08:15:00-07:00"),
-      energyScore: 5,
-      stressScore: 4,
-      availableCapacityMinutes: 210,
-      userNote: "Morning feels manageable before the lecture stack.",
-      source: "manual",
-    },
-  });
-
-  await prisma.checkinLog.upsert({
-    where: { id: "demo_checkin_log_2026_05_11_afternoon" },
-    update: {
-      planningCycleId,
-      loggedAt: new Date("2026-05-11T15:20:00-07:00"),
-      energyScore: 3,
-      stressScore: 6,
-      availableCapacityMinutes: 150,
-      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
-      source: "manual",
-    },
-    create: {
-      id: "demo_checkin_log_2026_05_11_afternoon",
-      userId: DEMO_USER_ID,
-      planningCycleId,
-      loggedAt: new Date("2026-05-11T15:20:00-07:00"),
-      energyScore: 3,
-      stressScore: 6,
-      availableCapacityMinutes: 150,
-      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
-      source: "manual",
-    },
-  });
+    for (const log of checkin.logs) {
+      const savedLog = await prisma.checkinLog.upsert({
+        where: { id: log.id },
+        update: {
+          planningCycleId,
+          loggedAt: log.loggedAt,
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: "manual",
+        },
+        create: {
+          id: log.id,
+          userId: DEMO_USER_ID,
+          planningCycleId,
+          loggedAt: log.loggedAt,
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: "manual",
+        },
+      });
+      seededCheckinLogIds.set(log.id, savedLog.id);
+    }
+  }
 
   await prisma.aiInsight.upsert({
     where: { id: "demo_insight_recovery_window" },
     update: {
       planningCycleId,
-      dailyCheckinId: "demo_checkin_2026_05_11",
-      checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
+      dailyCheckinId: seededCheckinIds.get("demo_checkin_2026_05_11"),
+      checkinLogId: seededCheckinLogIds.get("demo_checkin_log_2026_05_11_afternoon"),
       scope: "daily",
       insightType: "recovery_window",
       title: "Protect a recovery window tonight",
@@ -600,7 +694,7 @@ async function main() {
       sourceData: {
         energyScore: 3,
         stressScore: 6,
-        checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
+        checkinLogId: seededCheckinLogIds.get("demo_checkin_log_2026_05_11_afternoon"),
         checkinTimeline: [
           { id: "demo_checkin_log_2026_05_11_morning", energyScore: 5, stressScore: 4 },
           { id: "demo_checkin_log_2026_05_11_afternoon", energyScore: 3, stressScore: 6 },
@@ -612,8 +706,8 @@ async function main() {
       id: "demo_insight_recovery_window",
       userId: DEMO_USER_ID,
       planningCycleId,
-      dailyCheckinId: "demo_checkin_2026_05_11",
-      checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
+      dailyCheckinId: seededCheckinIds.get("demo_checkin_2026_05_11"),
+      checkinLogId: seededCheckinLogIds.get("demo_checkin_log_2026_05_11_afternoon"),
       scope: "daily",
       insightType: "recovery_window",
       title: "Protect a recovery window tonight",
@@ -623,7 +717,7 @@ async function main() {
       sourceData: {
         energyScore: 3,
         stressScore: 6,
-        checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
+        checkinLogId: seededCheckinLogIds.get("demo_checkin_log_2026_05_11_afternoon"),
         checkinTimeline: [
           { id: "demo_checkin_log_2026_05_11_morning", energyScore: 5, stressScore: 4 },
           { id: "demo_checkin_log_2026_05_11_afternoon", energyScore: 3, stressScore: 6 },
