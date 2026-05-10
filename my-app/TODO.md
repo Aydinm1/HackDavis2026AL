@@ -266,7 +266,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Keep `calendarId` on imported `CalendarEvent` rows so events from class/work/personal calendars can be shown together and filtered later.
 - [x] Calendar page should show a "Link calendars" / "Manage calendars" flow rather than only syncing `primary`.
 - [x] Scheduler should treat all selected imported calendars as fixed busy blocks.
-- [ ] **Deploy migration `20260510000300_add_google_calendar_selection`** — adds `calendarSummary`, `calendarDescription`, `calendarBackgroundColor`, `accessRole`, `isPrimary`, `isSelected` to `CalendarConnection`. Run `npx prisma migrate deploy` (requires `DIRECT_DATABASE_URL` in `.env`).
+- [x] Deploy migration `20260510000300_add_google_calendar_selection` — adds `calendarSummary`, `calendarDescription`, `calendarBackgroundColor`, `accessRole`, `isPrimary`, `isSelected` to `CalendarConnection`.
 
 ## Priority 2: Voice And Image Setup Now
 
@@ -288,13 +288,13 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Image Parsing
 
-- [ ] Wire image endpoint to `parseGeminiMultimodal(..., "image")`.
-- [ ] Fallback to mock image event if Gemini fails.
-- [ ] Create `UploadedInput` row before parsing.
-- [ ] Store parsed payload.
-- [ ] Create proposed `AiAction` rows.
-- [ ] Require confirmation for image-extracted actions.
-- [ ] Add confidence language in response.
+- [x] Wire image endpoint to `parseGeminiMultimodal(..., "image")`.
+- [x] Fallback to mock image event if Gemini fails.
+- [x] Create `UploadedInput` row before parsing.
+- [x] Store parsed payload.
+- [x] Create proposed `AiAction` rows.
+- [x] Require confirmation for image-extracted actions.
+- [x] Add confidence language in response.
 
 ### Voice Parsing
 
@@ -476,9 +476,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ## Recommended Next Build Order
 
-1. [ ] Deploy pending migration (`npx prisma migrate deploy`) — unblocks manage-calendars feature.
-2. [ ] Add move controls for scheduled blocks.
-3. [ ] Load existing chat thread history from APIs.
-4. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
-5. [ ] Finish voice/image Gemini flow and confirmation cards.
-6. [ ] Add metrics queries for check-in, completion, and AI action success.
+1. [ ] Load existing chat thread history from APIs.
+2. [ ] Add task breakdown button to tasks page.
+3. [ ] Add move controls for scheduled blocks.
+4. [ ] Finish voice parsing flow (transcript display, confirmation cards).
+5. [ ] Add metrics queries for check-in, completion, and AI action success.
