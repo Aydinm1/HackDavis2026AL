@@ -16,6 +16,8 @@ process.env.DATABASE_URL ??= "postgresql://user:password@localhost:5432/testdb?s
 let validateCompleteTaskBody: typeof TasksService.validateCompleteTaskBody;
 let validateCreateTaskBody: typeof TasksService.validateCreateTaskBody;
 let validatePatchTaskBody: typeof TasksService.validatePatchTaskBody;
+let validateTaskBreakdownBody: typeof TasksService.validateTaskBreakdownBody;
+let buildBreakdownSteps: typeof TasksService.buildBreakdownSteps;
 let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
@@ -48,6 +50,8 @@ before(async () => {
   validateCompleteTaskBody = tasksService.validateCompleteTaskBody;
   validateCreateTaskBody = tasksService.validateCreateTaskBody;
   validatePatchTaskBody = tasksService.validatePatchTaskBody;
+  validateTaskBreakdownBody = tasksService.validateTaskBreakdownBody;
+  buildBreakdownSteps = tasksService.buildBreakdownSteps;
   validateCalendarRange = calendarEventsService.validateCalendarRange;
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
@@ -123,6 +127,103 @@ test("task patch and complete validation allow status changes and actual minutes
 
   assert.equal(patch.ok, true);
   assert.equal(complete.ok, true);
+});
+
+test("task breakdown validation accepts replace and target block options", () => {
+  const valid = validateTaskBreakdownBody({
+    replaceExisting: true,
+    targetBlockMinutes: 45,
+  });
+  const empty = validateTaskBreakdownBody(undefined);
+  const badTarget = validateTaskBreakdownBody({
+    targetBlockMinutes: 10,
+  });
+  const unknown = validateTaskBreakdownBody({
+    force: true,
+  });
+
+  assert.equal(valid.ok, true);
+  assert.equal(empty.ok, true);
+  assert.equal(badTarget.ok, false);
+  assert.match(badTarget.ok ? "" : badTarget.error, /at least 15/);
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.ok ? "" : unknown.error, /Unsupported field/);
+});
+
+test("task breakdown builder keeps small tasks as one focused step", () => {
+  const steps = buildBreakdownSteps(
+    {
+      id: "task_small",
+      title: "Submit scholarship form",
+      workType: "admin",
+      estimatedMinutes: 30,
+      cognitiveLoad: 2,
+      canSplit: true,
+    },
+    45,
+  );
+
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]?.title, "Complete Submit scholarship form");
+  assert.equal(steps[0]?.estimatedMinutes, 30);
+});
+
+test("task breakdown builder splits large study tasks by target block length", () => {
+  const steps = buildBreakdownSteps(
+    {
+      id: "task_study",
+      title: "Study for chemistry midterm",
+      workType: "study",
+      estimatedMinutes: 180,
+      cognitiveLoad: 7,
+      canSplit: true,
+    },
+    45,
+  );
+
+  assert.equal(steps.length, 4);
+  assert.deepEqual(
+    steps.map((step) => step.title),
+    ["Review core material", "Practice problems or recall", "Self-test weak spots", "Summarize final takeaways"],
+  );
+  assert.deepEqual(
+    steps.map((step) => step.estimatedMinutes),
+    [45, 45, 45, 45],
+  );
+  assert.equal(steps[3]?.cognitiveLoad, 6);
+});
+
+test("task breakdown builder splits writing and project tasks with work-type templates", () => {
+  const writingSteps = buildBreakdownSteps(
+    {
+      id: "task_writing",
+      title: "History essay",
+      workType: "writing",
+      estimatedMinutes: 120,
+      cognitiveLoad: 5,
+      canSplit: true,
+    },
+    45,
+  );
+  const projectSteps = buildBreakdownSteps(
+    {
+      id: "task_project",
+      title: "CS project",
+      workType: "project",
+      estimatedMinutes: 200,
+      cognitiveLoad: 6,
+      canSplit: true,
+    },
+    50,
+  );
+
+  assert.equal(writingSteps.length, 3);
+  assert.equal(writingSteps[0]?.title, "Outline argument and evidence");
+  assert.equal(writingSteps[1]?.title, "Draft the main sections");
+
+  assert.equal(projectSteps.length, 4);
+  assert.equal(projectSteps[0]?.title, "Scope remaining work");
+  assert.equal(projectSteps[2]?.title, "Test the result");
 });
 
 test("calendar range validation requires start before end", () => {

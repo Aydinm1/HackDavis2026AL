@@ -153,14 +153,54 @@ Response: `200` with the updated task.
 
 Creates deterministic MVP task breakdowns without calling AI.
 
+Optional body:
+
+```json
+{
+  "replaceExisting": false,
+  "targetBlockMinutes": 45
+}
+```
+
 Behavior:
 
-- Study tasks get steps like reviewing notes and practice problems.
-- Writing tasks get outline, draft, revise steps.
-- Project tasks get requirements, implementation, testing steps.
-- Re-running the endpoint upserts the same deterministic breakdown IDs.
+- Small tasks at or under `targetBlockMinutes` return one focused step.
+- Large tasks split into blocks based on `targetBlockMinutes` or the user's preferred block length.
+- Study, writing, project, admin, reading, creative, personal, and focus tasks use work-type-specific step templates.
+- Existing breakdowns are preserved by default.
+- Pass `replaceExisting: true` to delete and regenerate existing breakdowns.
 
-Response: `201` with the task breakdown list.
+Response: `201` with breakdown metadata.
+
+```json
+{
+  "data": {
+    "task": {
+      "id": "demo_task_chem_midterm",
+      "title": "Study for chemistry midterm",
+      "workType": "study",
+      "estimatedMinutes": 180,
+      "cognitiveLoad": 7,
+      "canSplit": true
+    },
+    "breakdowns": [
+      {
+        "id": "demo_task_chem_midterm_breakdown_1",
+        "title": "Review core material",
+        "description": "Planned as part 1 of 4 for Study for chemistry midterm.",
+        "sequenceOrder": 1,
+        "estimatedMinutes": 45,
+        "cognitiveLoad": 7,
+        "status": "todo",
+        "createdBy": "ai"
+      }
+    ],
+    "replacedExisting": false,
+    "targetBlockMinutes": 45,
+    "message": "Task was split into 4 steps based on a 45-minute target block."
+  }
+}
+```
 
 ## Calendar Events
 

@@ -771,7 +771,7 @@ async function executeCreateTask(userId: string, action: MockParsedAction) {
 
   return {
     task,
-    taskBreakdowns: breakdown.ok ? breakdown.value : [],
+    taskBreakdowns: breakdown.ok ? breakdown.value.breakdowns : [],
   };
 }
 

@@ -55,6 +55,11 @@ type TaskPatchInput = Partial<TaskCreateInput> & {
   actualMinutes?: number | null;
 };
 
+type TaskBreakdownInput = {
+  replaceExisting?: boolean;
+  targetBlockMinutes?: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -328,6 +333,35 @@ export function validateCompleteTaskBody(body: unknown): ValidationResult<{ actu
   return { ok: true, value: { actualMinutes: actualMinutes.value } };
 }
 
+export function validateTaskBreakdownBody(body: unknown): ValidationResult<TaskBreakdownInput> {
+  if (body === undefined || body === null) {
+    return { ok: true, value: {} };
+  }
+
+  if (!isRecord(body)) {
+    return { ok: false, error: "Request body must be a JSON object." };
+  }
+
+  const unknownFieldsError = rejectUnknownFields(body, ["replaceExisting", "targetBlockMinutes"]);
+  if (unknownFieldsError) {
+    return { ok: false, error: unknownFieldsError };
+  }
+
+  const replaceExisting = parseBoolean(body.replaceExisting, "replaceExisting");
+  if (!replaceExisting.ok) return replaceExisting;
+
+  const targetBlockMinutes = parseInteger(body.targetBlockMinutes, "targetBlockMinutes", { min: 15, max: 180 });
+  if (!targetBlockMinutes.ok) return targetBlockMinutes;
+
+  return {
+    ok: true,
+    value: {
+      replaceExisting: replaceExisting.value,
+      targetBlockMinutes: targetBlockMinutes.value ?? undefined,
+    },
+  };
+}
+
 type TaskWriteData = Partial<Omit<Prisma.TaskUncheckedCreateInput, "id" | "userId">>;
 
 function compactTaskData(input: TaskCreateInput | TaskPatchInput): TaskWriteData {
@@ -414,61 +448,58 @@ export async function completeTask(
   });
 }
 
-function buildBreakdownSteps(task: {
+const breakdownTemplates: Record<string, string[]> = {
+  study: ["Review core material", "Practice problems or recall", "Self-test weak spots", "Summarize final takeaways"],
+  writing: ["Outline argument and evidence", "Draft the main sections", "Revise structure and clarity", "Proofread and finalize"],
+  project: ["Scope remaining work", "Implement focused changes", "Test the result", "Polish and prepare handoff"],
+  admin: ["Gather needed information", "Complete the form or task", "Submit and confirm"],
+  reading: ["Preview headings and goals", "Read actively with notes", "Summarize key takeaways"],
+  creative: ["Sketch the direction", "Create the first pass", "Refine the strongest version", "Review and export"],
+  personal: ["Clarify the next action", "Do the main task", "Wrap up and reset"],
+  focus: ["Clarify the next action", "Complete a focused work block", "Review and wrap up"],
+};
+
+function clampBreakdownLoad(cognitiveLoad: number, index: number, totalSteps: number) {
+  const adjustment = index === totalSteps - 1 && totalSteps > 1 ? -1 : 0;
+  return Math.max(1, Math.min(7, cognitiveLoad + adjustment));
+}
+
+export function buildBreakdownSteps(task: {
   id: string;
   title: string;
   workType: string;
   estimatedMinutes: number | null;
   cognitiveLoad: number;
-}) {
-  const totalMinutes = task.estimatedMinutes ?? 90;
-  const stepMinutes = Math.max(20, Math.ceil(totalMinutes / 3));
+  canSplit: boolean;
+}, targetBlockMinutes = 45) {
+  const safeTargetMinutes = Math.max(15, Math.min(180, Math.round(targetBlockMinutes)));
+  const totalMinutes = task.estimatedMinutes ?? safeTargetMinutes;
   const workType = task.workType.toLowerCase();
+  const templates = breakdownTemplates[workType] ?? breakdownTemplates.focus;
+  const shouldSplit = task.canSplit && totalMinutes > safeTargetMinutes;
+  const stepCount = shouldSplit ? Math.min(8, Math.max(2, Math.ceil(totalMinutes / safeTargetMinutes))) : 1;
+  const baseStepMinutes = Math.floor(totalMinutes / stepCount);
+  const remainderMinutes = totalMinutes % stepCount;
 
-  if (workType === "writing") {
-    return ["Outline argument and evidence", "Write first full draft", "Revise and proofread"].map((title, index) => ({
+  return Array.from({ length: stepCount }, (_, index) => {
+    const templateTitle = templates[index] ?? `Continue focused work block ${index + 1}`;
+    const title = stepCount === 1 ? `Complete ${task.title}` : templateTitle;
+
+    return {
       id: `${task.id}_breakdown_${index + 1}`,
       title,
+      description:
+        stepCount === 1
+          ? "This task is small enough to handle as one focused step."
+          : `Planned as part ${index + 1} of ${stepCount} for ${task.title}.`,
       sequenceOrder: index + 1,
-      estimatedMinutes: stepMinutes,
-      cognitiveLoad: Math.max(1, Math.min(7, task.cognitiveLoad - (index === 2 ? 1 : 0))),
-    }));
-  }
-
-  if (workType === "study") {
-    return ["Review notes and formulas", "Work practice problems", "Check weak spots and summarize"].map(
-      (title, index) => ({
-        id: `${task.id}_breakdown_${index + 1}`,
-        title,
-        sequenceOrder: index + 1,
-        estimatedMinutes: stepMinutes,
-        cognitiveLoad: Math.max(1, Math.min(7, task.cognitiveLoad - (index === 2 ? 1 : 0))),
-      }),
-    );
-  }
-
-  if (workType === "project") {
-    return ["Define remaining requirements", "Implement core changes", "Test and prepare handoff"].map(
-      (title, index) => ({
-        id: `${task.id}_breakdown_${index + 1}`,
-        title,
-        sequenceOrder: index + 1,
-        estimatedMinutes: stepMinutes,
-        cognitiveLoad: Math.max(1, Math.min(7, task.cognitiveLoad - (index === 0 ? 1 : 0))),
-      }),
-    );
-  }
-
-  return ["Clarify next step", "Complete focused work block", "Review and wrap up"].map((title, index) => ({
-    id: `${task.id}_breakdown_${index + 1}`,
-    title,
-    sequenceOrder: index + 1,
-    estimatedMinutes: stepMinutes,
-    cognitiveLoad: Math.max(1, Math.min(7, task.cognitiveLoad)),
-  }));
+      estimatedMinutes: baseStepMinutes + (index < remainderMinutes ? 1 : 0),
+      cognitiveLoad: clampBreakdownLoad(task.cognitiveLoad, index, stepCount),
+    };
+  });
 }
 
-export async function generateTaskBreakdown(userId: string, taskId: string) {
+export async function generateTaskBreakdown(userId: string, taskId: string, input: TaskBreakdownInput = {}) {
   const task = await prisma.task.findFirst({
     where: { id: taskId, userId },
     select: {
@@ -477,6 +508,16 @@ export async function generateTaskBreakdown(userId: string, taskId: string) {
       workType: true,
       estimatedMinutes: true,
       cognitiveLoad: true,
+      canSplit: true,
+      user: {
+        select: {
+          preferences: {
+            select: {
+              preferredBlockLengthMinutes: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -484,7 +525,34 @@ export async function generateTaskBreakdown(userId: string, taskId: string) {
     return { ok: false as const, error: "Task not found.", status: 404 };
   }
 
-  const steps = buildBreakdownSteps(task);
+  const { user, ...taskData } = task;
+  const existingBreakdowns = await prisma.taskBreakdown.findMany({
+    where: { userId, taskId },
+    orderBy: { sequenceOrder: "asc" },
+  });
+
+  const targetBlockMinutes = input.targetBlockMinutes ?? user.preferences?.preferredBlockLengthMinutes ?? 45;
+
+  if (existingBreakdowns.length > 0 && !input.replaceExisting) {
+    return {
+      ok: true as const,
+      value: {
+        task: taskData,
+        breakdowns: existingBreakdowns,
+        replacedExisting: false,
+        targetBlockMinutes,
+        message: "Existing breakdowns were preserved. Pass replaceExisting: true to regenerate them.",
+      },
+    };
+  }
+
+  const steps = buildBreakdownSteps(task, targetBlockMinutes);
+
+  if (existingBreakdowns.length > 0 && input.replaceExisting) {
+    await prisma.taskBreakdown.deleteMany({
+      where: { userId, taskId },
+    });
+  }
 
   await Promise.all(
     steps.map((step) =>
@@ -492,6 +560,7 @@ export async function generateTaskBreakdown(userId: string, taskId: string) {
         where: { id: step.id },
         update: {
           title: step.title,
+          description: step.description,
           sequenceOrder: step.sequenceOrder,
           estimatedMinutes: step.estimatedMinutes,
           cognitiveLoad: step.cognitiveLoad,
@@ -503,6 +572,7 @@ export async function generateTaskBreakdown(userId: string, taskId: string) {
           userId,
           taskId,
           title: step.title,
+          description: step.description,
           sequenceOrder: step.sequenceOrder,
           estimatedMinutes: step.estimatedMinutes,
           cognitiveLoad: step.cognitiveLoad,
@@ -518,5 +588,17 @@ export async function generateTaskBreakdown(userId: string, taskId: string) {
     orderBy: { sequenceOrder: "asc" },
   });
 
-  return { ok: true as const, value: breakdowns };
+  return {
+    ok: true as const,
+    value: {
+      task: taskData,
+      breakdowns,
+      replacedExisting: existingBreakdowns.length > 0 && input.replaceExisting === true,
+      targetBlockMinutes,
+      message:
+        steps.length === 1
+          ? "Task is small enough to handle as one focused step."
+          : `Task was split into ${steps.length} steps based on a ${targetBlockMinutes}-minute target block.`,
+    },
+  };
 }

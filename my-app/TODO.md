@@ -63,7 +63,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [ ] Voice/image pipeline exists, but API and frontend need final alignment around `imageData`, `audioData`, `mimeType`, transcripts, and proposed action cards.
 - [ ] Gemini parser exists, but fallback and confidence behavior should be tightened for demo reliability.
 - [x] Task difficulty exists as `cognitiveLoad`; backend/chat inference and task-page manual controls are started.
-- [ ] Task breakdown exists, but is still deterministic/basic and not good enough for bigger tasks.
+- [x] Task breakdown supports small-task one-step output, large-task splitting, work-type templates, and preserve-vs-replace behavior.
 - [x] Schedule read/update APIs exist, and MVP schedule generation is implemented.
 - [ ] Daily adjustment exists, but does not yet rewrite or propose concrete block changes.
 - [x] Daily check-in can be submitted from the Today dashboard and chat.
@@ -140,23 +140,23 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Bigger Task Breakdown
 
-- [ ] Improve `POST /api/tasks/[id]/breakdown`.
-- [ ] If `estimatedMinutes <= preferredBlockLengthMinutes`, return one step or explain no breakdown needed.
-- [ ] If `estimatedMinutes` is large, split by preferred block length.
-- [ ] Generate breakdowns using `workType`:
-  - [ ] study: review, practice, self-test, summarize
-  - [ ] writing: outline, draft, revise, proofread
-  - [ ] project: scope, implement, test, polish
-  - [ ] admin: gather info, complete form/task, submit/check
-- [ ] Preserve existing breakdowns unless user requests replacement.
-- [ ] Add optional body:
-  - [ ] `replaceExisting?: boolean`
-  - [ ] `targetBlockMinutes?: number`
-- [ ] Return:
-  - [ ] task
-  - [ ] breakdowns
-  - [ ] replacedExisting
-- [ ] Add tests for large writing/study/project tasks.
+- [x] Improve `POST /api/tasks/[id]/breakdown`.
+- [x] If `estimatedMinutes <= preferredBlockLengthMinutes`, return one step or explain no breakdown needed.
+- [x] If `estimatedMinutes` is large, split by preferred block length.
+- [x] Generate breakdowns using `workType`:
+  - [x] study: review, practice, self-test, summarize
+  - [x] writing: outline, draft, revise, proofread
+  - [x] project: scope, implement, test, polish
+  - [x] admin: gather info, complete form/task, submit/check
+- [x] Preserve existing breakdowns unless user requests replacement.
+- [x] Add optional body:
+  - [x] `replaceExisting?: boolean`
+  - [x] `targetBlockMinutes?: number`
+- [x] Return:
+  - [x] task
+  - [x] breakdowns
+  - [x] replacedExisting
+- [x] Add tests for large writing/study/project tasks.
 
 ### Daily Adjustment
 
