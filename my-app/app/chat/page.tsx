@@ -2,6 +2,37 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 
+function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt="Full screen preview"
+        className="max-h-[90vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors text-lg"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 type ActionStatus = "proposed" | "executed" | "failed" | "cancelled";
 
 type AiAction = {
@@ -286,11 +317,13 @@ function Message({
   onConfirm,
   onCancel,
   pendingActionIds,
+  onImageClick,
 }: {
   entry: ChatEntry;
   onConfirm: (actionId: string, inputPayload?: Record<string, unknown>) => void;
   onCancel: (actionId: string) => void;
   pendingActionIds: Set<string>;
+  onImageClick: (src: string) => void;
 }) {
   const isUser = entry.role === "user";
   const imageUrls = entry.imageDataUrls ?? (entry.imageDataUrl ? [entry.imageDataUrl] : []);
@@ -304,7 +337,8 @@ function Message({
               key={i}
               src={url}
               alt={`Uploaded image ${i + 1}`}
-              className="h-40 max-w-[240px] rounded-2xl rounded-br-sm border border-zinc-200 object-cover"
+              className="h-40 max-w-[240px] rounded-2xl rounded-br-sm border border-zinc-200 object-cover cursor-zoom-in"
+              onClick={() => onImageClick(url)}
             />
           ))}
         </div>
@@ -393,6 +427,7 @@ export default function ChatPage() {
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [isRecording, setIsRecording] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -675,6 +710,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen flex-col bg-zinc-50 font-sans">
+      {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       {/* Header */}
       <header className="border-b border-zinc-200 bg-white px-6 py-4 flex items-center gap-3">
         <div className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-white text-sm font-bold">
@@ -731,6 +767,7 @@ export default function ChatPage() {
             onConfirm={(actionId, inputPayload) => void updateAction(actionId, "confirm", inputPayload)}
             onCancel={(actionId) => void updateAction(actionId, "cancel")}
             pendingActionIds={pendingActionIds}
+            onImageClick={setLightboxSrc}
           />
         ))}
 
