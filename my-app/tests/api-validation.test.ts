@@ -24,6 +24,8 @@ let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
+let validateGenerateScheduleBody: typeof ScheduledBlocksService.validateGenerateScheduleBody;
+let findFirstAvailableSlot: typeof ScheduledBlocksService.findFirstAvailableSlot;
 let validateVoiceUploadBody: typeof UploadsService.validateVoiceUploadBody;
 let validateImageUploadBody: typeof UploadsService.validateImageUploadBody;
 
@@ -50,6 +52,8 @@ before(async () => {
   parseMockChatMessage = mockParser.parseMockChatMessage;
   validateGeminiResponse = geminiParser.validateGeminiResponse;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
+  validateGenerateScheduleBody = scheduledBlocksService.validateGenerateScheduleBody;
+  findFirstAvailableSlot = scheduledBlocksService.findFirstAvailableSlot;
   validateVoiceUploadBody = uploadsService.validateVoiceUploadBody;
   validateImageUploadBody = uploadsService.validateImageUploadBody;
 });
@@ -171,6 +175,68 @@ test("scheduled block patch validation accepts mutable fields only", () => {
   assert.match(badPatch.ok ? "" : badPatch.error, /Unsupported field/);
 });
 
+test("schedule generation validation accepts optional range and dry run", () => {
+  const result = validateGenerateScheduleBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    start: "2026-05-11T00:00:00-07:00",
+    end: "2026-05-18T00:00:00-07:00",
+    dryRun: true,
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.planningCycleId, "demo_cycle_2026_05_11");
+    assert.equal(result.value.dryRun, true);
+    assert.ok(result.value.start instanceof Date);
+    assert.ok(result.value.end instanceof Date);
+  }
+});
+
+test("schedule generation validation rejects partial or inverted ranges", () => {
+  const partial = validateGenerateScheduleBody({
+    start: "2026-05-11T00:00:00-07:00",
+  });
+  const inverted = validateGenerateScheduleBody({
+    start: "2026-05-18T00:00:00-07:00",
+    end: "2026-05-11T00:00:00-07:00",
+  });
+
+  assert.equal(partial.ok, false);
+  assert.match(partial.ok ? "" : partial.error, /start and end must be provided together/);
+
+  assert.equal(inverted.ok, false);
+  assert.match(inverted.ok ? "" : inverted.error, /endTime must be after startTime/);
+});
+
+test("schedule slot finder avoids busy windows and honors work hours", () => {
+  const slot = findFirstAvailableSlot({
+    range: {
+      start: new Date("2026-05-11T09:00:00-07:00"),
+      end: new Date("2026-05-11T17:00:00-07:00"),
+    },
+    durationMinutes: 45,
+    busyWindows: [
+      {
+        startTime: new Date("2026-05-11T09:00:00-07:00"),
+        endTime: new Date("2026-05-11T10:00:00-07:00"),
+      },
+    ],
+    preferences: {
+      workStartTime: "09:00",
+      workEndTime: "17:00",
+      minimumBreakMinutes: 15,
+      maxTotalWorkMinutesPerDay: 360,
+      maxHardWorkMinutesPerDay: 180,
+    },
+    dayUsage: new Map(),
+    cognitiveLoad: 4,
+  });
+
+  assert.ok(slot);
+  assert.equal(slot.startTime.toISOString(), new Date("2026-05-11T10:15:00-07:00").toISOString());
+  assert.equal(slot.endTime.toISOString(), new Date("2026-05-11T11:00:00-07:00").toISOString());
+});
+
 test("daily check-in validation accepts required fields and adjustToday", () => {
   const result = validateDailyCheckinBody({
     planningCycleId: "demo_cycle_2026_05_11",
@@ -243,8 +309,29 @@ test("mock parser creates task and event actions from simple text", () => {
   assert.equal(taskActions[0]?.inputPayload.priority, 1);
 
   assert.equal(eventActions[0]?.actionType, "CREATE_EVENT");
-  assert.equal(eventActions[0]?.requiresConfirmation, false);
+  assert.equal(eventActions[0]?.requiresConfirmation, true);
   assert.equal(typeof eventActions[0]?.inputPayload.startTime, "string");
+});
+
+test("mock parser treats implicit midterm study request as a proposed task", () => {
+  const actions = parseMockChatMessage("i have a midterm on tuesday for bio at 1pm i need to study for this");
+  const eventAction = actions.find((action) => action.actionType === "CREATE_EVENT");
+
+  assert.equal(actions[0]?.actionType, "CREATE_TASK");
+  assert.equal(actions[0]?.requiresConfirmation, true);
+  assert.equal(actions[0]?.inputPayload.title, "Study for bio midterm");
+  assert.equal(actions[0]?.inputPayload.workType, "study");
+  assert.equal(actions[0]?.inputPayload.cognitiveLoad, 6);
+  assert.equal(actions[0]?.inputPayload.estimatedMinutes, 180);
+
+  assert.equal(eventAction?.inputPayload.title, "bio midterm");
+  assert.equal(eventAction?.requiresConfirmation, true);
+  assert.equal(typeof eventAction?.inputPayload.startTime, "string");
+  assert.equal(typeof eventAction?.inputPayload.endTime, "string");
+
+  const startTime = new Date(eventAction?.inputPayload.startTime as string);
+  const endTime = new Date(eventAction?.inputPayload.endTime as string);
+  assert.equal(endTime.getTime() - startTime.getTime(), 60 * 60_000);
 });
 
 test("mock parser requires confirmation or clarification for updates", () => {

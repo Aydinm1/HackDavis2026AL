@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 import { parseGeminiChatMessage } from "@/lib/ai/geminiParser";
 import type { MockParsedAction } from "@/lib/ai/mockParser";
 import { prisma } from "@/lib/db";
+import { generateSchedule } from "@/lib/services/scheduledBlocks";
+import { generateTaskBreakdown } from "@/lib/services/tasks";
 
 type ValidationResult<T> =
   | { ok: true; value: T }
@@ -11,6 +13,16 @@ type ChatMessageInput = {
   threadId?: string;
   planningCycleId?: string | null;
   content: string;
+};
+
+const weekdayIndex: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,6 +59,301 @@ function rejectUnknownFields(body: Record<string, unknown>, allowedFields: reado
 
 function jsonObject(value: unknown): Prisma.InputJsonObject {
   return value as Prisma.InputJsonObject;
+}
+
+function clampInteger(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function inferTaskWorkType(text: string) {
+  if (/\b(study|midterm|exam|test|quiz|final)\b/i.test(text)) return "study";
+  if (/\b(essay|paper|write|writing|draft)\b/i.test(text)) return "writing";
+  if (/\b(project|build|implement|code|cs)\b/i.test(text)) return "project";
+  if (/\b(read|reading|chapter)\b/i.test(text)) return "reading";
+  if (/\b(form|email|admin|submit)\b/i.test(text)) return "admin";
+  return "focus";
+}
+
+function inferCognitiveLoad(text: string, workType: string) {
+  if (/\b(easy|quick|simple|light)\b/i.test(text)) return 2;
+  if (/\b(deep work|hard|difficult|intense)\b/i.test(text)) return 6;
+  if (/\b(midterm|exam|final|project|essay|paper)\b/i.test(text)) return 6;
+
+  const defaults: Record<string, number> = {
+    study: 5,
+    writing: 5,
+    project: 6,
+    admin: 2,
+    reading: 4,
+    creative: 5,
+    personal: 3,
+    focus: 4,
+  };
+
+  return defaults[workType] ?? 4;
+}
+
+function parseEstimatedMinutes(text: string) {
+  const hourMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i);
+  if (hourMatch) {
+    return clampInteger(Number(hourMatch[1]) * 60, 15, 720);
+  }
+
+  const minuteMatch = text.match(/\b(\d+)\s*(?:minutes?|mins?|m)\b/i);
+  if (minuteMatch) {
+    return clampInteger(Number(minuteMatch[1]), 15, 720);
+  }
+
+  if (/\b(final|project)\b/i.test(text)) return 240;
+  if (/\b(midterm|exam|essay|paper)\b/i.test(text)) return 180;
+  if (/\bquiz|test\b/i.test(text)) return 90;
+  if (/\breading|chapter\b/i.test(text)) return 60;
+  if (/\bquick|simple|easy\b/i.test(text)) return 30;
+
+  return undefined;
+}
+
+function parsePriorityFromText(text: string) {
+  if (/\b(high priority|urgent|asap|important|midterm|final)\b/i.test(text)) return 1;
+  if (/\b(medium priority)\b/i.test(text)) return 3;
+  if (/\b(low priority|not urgent)\b/i.test(text)) return 5;
+  return undefined;
+}
+
+function inferStudyTitle(text: string) {
+  const assessment = text.match(/\b(midterm|exam|test|quiz|final)\b/i)?.[1]?.toLowerCase() ?? "assessment";
+  const subjectMatch = text.match(/\b(?:for|in)\s+([a-z][a-z\s&-]*?)(?:\s+(?:at|on|by|due|i need|need)\b|$)/i);
+  const subject = subjectMatch?.[1]?.replace(/\bthis\b/gi, "").replace(/\s+/g, " ").trim();
+
+  return subject ? `Study for ${subject} ${assessment}` : `Study for ${assessment}`;
+}
+
+function isImplicitStudyTask(text: string) {
+  return /\b(study|review|prepare|prep)\b/i.test(text) && /\b(midterm|exam|test|quiz|final)\b/i.test(text);
+}
+
+function isImplicitCalendarEvent(text: string) {
+  return /\b(midterm|exam|test|quiz|final|event|appointment)\b/i.test(text) && /\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i.test(text);
+}
+
+function inferEventTitle(text: string) {
+  const assessmentForSubjectMatch = text.match(/\b(midterm|exam|test|quiz|final)\b.*?\b(?:for|in)\s+([a-z][a-z\s&-]*?)(?:\s+(?:at|on|by|due|i need|need|that|this)\b|$)/i);
+  if (assessmentForSubjectMatch) {
+    return `${assessmentForSubjectMatch[2]} ${assessmentForSubjectMatch[1]}`.replace(/\s+/g, " ").trim();
+  }
+
+  const assessmentMatch = text.match(/\b(?:for|in)?\s*([a-z][a-z\s&-]*?)\s+(midterm|exam|test|quiz|final)\b/i);
+  if (assessmentMatch) {
+    return `${assessmentMatch[1]} ${assessmentMatch[2]}`.replace(/\s+/g, " ").trim();
+  }
+
+  const appointmentMatch = text.match(/\b(?:add\s+)?(.+?)\s+(?:event|appointment)\b/i);
+  return appointmentMatch?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function parseEventDate(text: string) {
+  const dateMatch = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (dateMatch) {
+    return dateMatch[1];
+  }
+
+  const weekdayMatch = text.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  if (!weekdayMatch) {
+    return null;
+  }
+
+  const today = new Date();
+  const targetDay = weekdayIndex[weekdayMatch[1].toLowerCase()];
+  const daysUntil = (targetDay - today.getDay() + 7) % 7;
+  const date = new Date(today);
+  date.setDate(today.getDate() + daysUntil);
+
+  return date.toISOString().slice(0, 10);
+}
+
+function inferEventWindow(text: string) {
+  const date = parseEventDate(text);
+  const timeMatch = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+
+  if (!date || !timeMatch) {
+    return null;
+  }
+
+  const [, hourText, minuteText, meridiem] = timeMatch;
+  let hour = Number(hourText);
+  const minute = minuteText ? Number(minuteText) : 0;
+
+  if (meridiem?.toLowerCase() === "pm" && hour < 12) hour += 12;
+  if (meridiem?.toLowerCase() === "am" && hour === 12) hour = 0;
+
+  const startTime = new Date(`${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00-07:00`);
+  const endTime = new Date(startTime.getTime() + 60 * 60_000);
+
+  return { startTime, endTime };
+}
+
+function buildBreakdownPreview(workType: string, estimatedMinutes: number, cognitiveLoad: number) {
+  const templates: Record<string, string[]> = {
+    study: ["Review notes and key concepts", "Work practice problems", "Self-test and summarize weak spots"],
+    writing: ["Outline argument and evidence", "Write first draft", "Revise and proofread"],
+    project: ["Scope remaining work", "Implement focused changes", "Test and polish"],
+    admin: ["Gather needed info", "Complete the task", "Submit and confirm"],
+    reading: ["Skim headings and goals", "Read actively with notes", "Summarize takeaways"],
+    focus: ["Clarify next step", "Complete focused work block", "Review and wrap up"],
+  };
+  const titles = templates[workType] ?? templates.focus;
+  const stepMinutes = Math.max(20, Math.ceil(estimatedMinutes / titles.length));
+
+  return titles.map((title, index) => ({
+    title,
+    sequenceOrder: index + 1,
+    estimatedMinutes: stepMinutes,
+    cognitiveLoad: Math.max(1, Math.min(7, cognitiveLoad - (index === titles.length - 1 ? 1 : 0))),
+  }));
+}
+
+function normalizeCreateTaskAction(action: MockParsedAction, originalText: string): MockParsedAction {
+  if (action.actionType !== "CREATE_TASK") {
+    return action;
+  }
+
+  const payload = action.inputPayload;
+  const workType = typeof payload.workType === "string" && payload.workType !== "focus"
+    ? payload.workType
+    : inferTaskWorkType(originalText);
+  const estimatedMinutes = typeof payload.estimatedMinutes === "number"
+    ? clampInteger(payload.estimatedMinutes, 15, 720)
+    : parseEstimatedMinutes(originalText);
+  const cognitiveLoad = typeof payload.cognitiveLoad === "number"
+    ? clampInteger(payload.cognitiveLoad, 1, 7)
+    : inferCognitiveLoad(originalText, workType);
+  const priority = typeof payload.priority === "number"
+    ? clampInteger(payload.priority, 1, 5)
+    : parsePriorityFromText(originalText);
+  const inferredTitle = isImplicitStudyTask(originalText) ? inferStudyTitle(originalText) : undefined;
+  const title = typeof payload.title === "string" && payload.title.trim()
+    ? payload.title.trim()
+    : inferredTitle ?? "";
+
+  const missingPlanningInputs = !estimatedMinutes || !cognitiveLoad;
+  const requiresReview = action.requiresConfirmation || missingPlanningInputs || isImplicitStudyTask(originalText);
+  const breakdownPreview = estimatedMinutes && cognitiveLoad
+    ? buildBreakdownPreview(workType, estimatedMinutes, cognitiveLoad)
+    : undefined;
+
+  return {
+    ...action,
+    requiresConfirmation: requiresReview,
+    ambiguous: action.ambiguous || !title || missingPlanningInputs,
+    inputPayload: {
+      ...payload,
+      title,
+      priority: priority ?? 3,
+      cognitiveLoad,
+      estimatedMinutes,
+      workType,
+      type: typeof payload.type === "string" ? payload.type : "school",
+      timeframe: typeof payload.timeframe === "string" ? payload.timeframe : "weekly",
+      canSplit: true,
+      createdBy: "chat",
+      rawText: originalText,
+      breakdownPreview,
+    },
+    assistantSummary: missingPlanningInputs
+      ? `I can create "${title || "that task"}", but I need estimated time and difficulty before adding it.`
+      : requiresReview
+        ? `I estimated "${title}" as ${estimatedMinutes} minutes with difficulty ${cognitiveLoad}/7 and prepared a ${breakdownPreview?.length ?? 0}-step breakdown. Please confirm before I add it.`
+        : action.assistantSummary,
+  };
+}
+
+function normalizeCreateEventAction(action: MockParsedAction, originalText: string): MockParsedAction {
+  if (action.actionType !== "CREATE_EVENT") {
+    return action;
+  }
+
+  const payload = action.inputPayload;
+  const inferredWindow = inferEventWindow(originalText);
+  const title = typeof payload.title === "string" && payload.title.trim()
+    ? payload.title.trim()
+    : inferEventTitle(originalText);
+  const startTime = typeof payload.startTime === "string"
+    ? payload.startTime
+    : inferredWindow?.startTime.toISOString();
+  const endTime = typeof payload.endTime === "string"
+    ? payload.endTime
+    : inferredWindow?.endTime.toISOString();
+  const usedDefaultDuration = !payload.endTime && Boolean(inferredWindow);
+  const inferredImplicitEvent = isImplicitCalendarEvent(originalText);
+  const ambiguous = action.ambiguous || !title || !startTime || !endTime;
+  const requiresReview = ambiguous || action.requiresConfirmation || usedDefaultDuration || inferredImplicitEvent;
+
+  return {
+    ...action,
+    requiresConfirmation: requiresReview,
+    ambiguous,
+    inputPayload: {
+      ...payload,
+      title,
+      startTime,
+      endTime,
+      isAllDay: typeof payload.isAllDay === "boolean" ? payload.isAllDay : false,
+      source: "chat",
+      inferredDurationMinutes: usedDefaultDuration ? 60 : undefined,
+      rawText: originalText,
+    },
+    assistantSummary: ambiguous
+      ? "I can add that event, but I need the date and time first."
+      : requiresReview
+        ? `I inferred "${title}" as a one-hour event. Please confirm before I add it.`
+        : action.assistantSummary,
+  };
+}
+
+function addImplicitStudyActionIfNeeded(actions: MockParsedAction[], originalText: string) {
+  if (!isImplicitStudyTask(originalText) || actions.some((action) => action.actionType === "CREATE_TASK")) {
+    return actions;
+  }
+
+  return [
+    ...actions,
+    normalizeCreateTaskAction(
+      {
+        actionType: "CREATE_TASK",
+        requiresConfirmation: true,
+        ambiguous: false,
+        inputPayload: {},
+        assistantSummary: "",
+      },
+      originalText,
+    ),
+  ];
+}
+
+function addImplicitEventActionIfNeeded(actions: MockParsedAction[], originalText: string) {
+  if (!isImplicitCalendarEvent(originalText) || actions.some((action) => action.actionType === "CREATE_EVENT")) {
+    return actions;
+  }
+
+  return [
+    ...actions,
+    normalizeCreateEventAction(
+      {
+        actionType: "CREATE_EVENT",
+        requiresConfirmation: false,
+        ambiguous: false,
+        inputPayload: {},
+        assistantSummary: "",
+      },
+      originalText,
+    ),
+  ];
+}
+
+function normalizeParsedActions(actions: MockParsedAction[], originalText: string) {
+  return addImplicitEventActionIfNeeded(addImplicitStudyActionIfNeeded(actions, originalText), originalText).map((action) =>
+    normalizeCreateEventAction(normalizeCreateTaskAction(action, originalText), originalText),
+  );
 }
 
 export function validateChatMessageBody(body: unknown): ValidationResult<ChatMessageInput> {
@@ -116,14 +423,21 @@ async function executeCreateTask(userId: string, action: MockParsedAction) {
       dueAt: typeof payload.dueAt === "string" ? new Date(payload.dueAt) : undefined,
       priority: typeof payload.priority === "number" ? payload.priority : 3,
       cognitiveLoad: typeof payload.cognitiveLoad === "number" ? payload.cognitiveLoad : 4,
+      estimatedMinutes: typeof payload.estimatedMinutes === "number" ? payload.estimatedMinutes : undefined,
       type: typeof payload.type === "string" ? payload.type : "school",
       workType: typeof payload.workType === "string" ? payload.workType : "focus",
       timeframe: typeof payload.timeframe === "string" ? payload.timeframe : "weekly",
+      canSplit: typeof payload.canSplit === "boolean" ? payload.canSplit : true,
       createdBy: "chat",
     },
   });
 
-  return { task };
+  const breakdown = await generateTaskBreakdown(userId, task.id);
+
+  return {
+    task,
+    taskBreakdowns: breakdown.ok ? breakdown.value : [],
+  };
 }
 
 async function executeCreateEvent(userId: string, action: MockParsedAction) {
@@ -186,17 +500,27 @@ async function executeUpdateTask(userId: string, action: MockParsedAction) {
   return { task: updatedTask };
 }
 
-async function executeGenerateSchedule() {
-  return {
-    suggestion: "For MVP, use /api/schedule and /api/schedule/adjust-today to build the visible plan from tasks, events, and scheduled blocks.",
-  };
+async function executeGenerateSchedule(userId: string, action: MockParsedAction) {
+  const payload = action.inputPayload;
+  const result = await generateSchedule(userId, {
+    planningCycleId: typeof payload.planningCycleId === "string" ? payload.planningCycleId : undefined,
+    start: typeof payload.start === "string" ? new Date(payload.start) : undefined,
+    end: typeof payload.end === "string" ? new Date(payload.end) : undefined,
+    dryRun: typeof payload.dryRun === "boolean" ? payload.dryRun : undefined,
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+
+  return result.value;
 }
 
 async function executeAction(userId: string, action: MockParsedAction) {
   if (action.actionType === "CREATE_TASK") return executeCreateTask(userId, action);
   if (action.actionType === "CREATE_EVENT") return executeCreateEvent(userId, action);
   if (action.actionType === "UPDATE_TASK") return executeUpdateTask(userId, action);
-  return executeGenerateSchedule();
+  return executeGenerateSchedule(userId, action);
 }
 
 async function recordAndMaybeExecuteAction(params: {
@@ -271,7 +595,7 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
     },
   });
 
-  const parsedActions = await parseGeminiChatMessage(input.content);
+  const parsedActions = normalizeParsedActions(await parseGeminiChatMessage(input.content), input.content);
   const actions = await Promise.all(
     parsedActions.map((action) =>
       recordAndMaybeExecuteAction({

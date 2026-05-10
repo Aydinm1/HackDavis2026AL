@@ -296,6 +296,59 @@ Response:
 }
 ```
 
+### POST `/api/schedule/generate`
+
+Generates proposed scheduled work blocks around calendar events and existing scheduled blocks.
+
+Accepted body:
+
+```json
+{
+  "planningCycleId": "demo_cycle_2026_05_11",
+  "start": "2026-05-11T00:00:00-07:00",
+  "end": "2026-05-18T00:00:00-07:00",
+  "dryRun": false
+}
+```
+
+All fields are optional, but `start` and `end` must be provided together. If no range is provided, the active planning cycle is used, then a seven-day fallback window.
+
+Behavior:
+
+- Uses incomplete tasks, user preferences, fixed calendar events, existing active scheduled blocks, and the latest daily check-in.
+- Creates `proposed` scheduled blocks unless `dryRun` is `true`.
+- Does not overlap non-cancelled calendar events or active scheduled blocks.
+- Respects work hours, preferred block length, minimum breaks, daily total work limits, and daily hard-work limits.
+- Prefers tasks with nearer due dates and higher priority.
+- Returns unscheduled task reasons when work does not fit.
+
+Example response:
+
+```json
+{
+  "data": {
+    "range": {
+      "start": "2026-05-11T07:00:00.000Z",
+      "end": "2026-05-18T07:00:00.000Z"
+    },
+    "dryRun": false,
+    "scheduledBlocks": [
+      {
+        "id": "generated-block-id",
+        "taskId": "demo_task_chem_midterm",
+        "title": "Study for chemistry midterm",
+        "startTime": "2026-05-11T17:30:00.000Z",
+        "endTime": "2026-05-11T18:15:00.000Z",
+        "status": "proposed",
+        "source": "scheduler",
+        "schedulingReason": "Priority 1, due in 3 days, deep-work task."
+      }
+    ],
+    "unscheduledTasks": []
+  }
+}
+```
+
 ## Dashboard
 
 ### GET `/api/dashboard/today?date=YYYY-MM-DD`

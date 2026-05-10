@@ -91,14 +91,20 @@ export function validateGeminiResponse(raw: unknown): MockParsedAction[] {
   return result;
 }
 
-const ai = new GoogleGenAI({
-  vertexai: true,
-  project: process.env.GOOGLE_CLOUD_PROJECT,
-  location: process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1",
-});
+let ai: GoogleGenAI | null = null;
+
+function getGeminiClient() {
+  ai ??= new GoogleGenAI({
+    vertexai: true,
+    project: process.env.GOOGLE_CLOUD_PROJECT,
+    location: process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1",
+  });
+
+  return ai;
+}
 
 async function callGemini(modelName: string, systemInstruction: string, parts: Part[]): Promise<string> {
-  const response = await ai.models.generateContent({
+  const response = await getGeminiClient().models.generateContent({
     model: modelName,
     contents: [{ role: "user", parts }],
     config: {
@@ -112,7 +118,7 @@ async function callGemini(modelName: string, systemInstruction: string, parts: P
 }
 
 async function callGeminiTranscribe(modelName: string, parts: Part[]): Promise<string> {
-  const response = await ai.models.generateContent({
+  const response = await getGeminiClient().models.generateContent({
     model: modelName,
     contents: [{ role: "user", parts }],
     config: {
