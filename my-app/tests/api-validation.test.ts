@@ -22,6 +22,7 @@ let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
 let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
+let buildTodayScheduleAdjustmentSuggestions: typeof CheckinsService.buildTodayScheduleAdjustmentSuggestions;
 let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let resolveNextWeekdayDate: typeof ChatService.resolveNextWeekdayDate;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
@@ -56,6 +57,7 @@ before(async () => {
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
   validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
+  buildTodayScheduleAdjustmentSuggestions = checkinsService.buildTodayScheduleAdjustmentSuggestions;
   validateChatMessageBody = chatService.validateChatMessageBody;
   resolveNextWeekdayDate = chatService.resolveNextWeekdayDate;
   parseDashboardDate = dashboardService.parseDashboardDate;
@@ -418,6 +420,87 @@ test("daily check-in validation rejects mood and sleep fields", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.ok ? "" : result.error, /Unsupported field/);
+});
+
+test("daily schedule adjustment shortens urgent high-load blocks during overload", () => {
+  const suggestions = buildTodayScheduleAdjustmentSuggestions({
+    now: new Date("2026-05-11T09:00:00-07:00"),
+    checkin: {
+      id: "checkin",
+      energyScore: 2,
+      stressScore: 6,
+      availableCapacityMinutes: 120,
+      planningCycleId: "cycle",
+    },
+    replacementTasks: [],
+    blocks: [
+      {
+        id: "block_urgent",
+        taskId: "task_urgent",
+        title: "Chem midterm practice",
+        startTime: new Date("2026-05-11T10:00:00-07:00"),
+        endTime: new Date("2026-05-11T11:30:00-07:00"),
+        status: "accepted",
+        task: {
+          id: "task_urgent",
+          title: "Study for chemistry midterm",
+          priority: 1,
+          cognitiveLoad: 7,
+          dueAt: new Date("2026-05-12T13:00:00-07:00"),
+          estimatedMinutes: 180,
+          workType: "study",
+        },
+      },
+    ],
+  });
+
+  assert.equal(suggestions[0]?.action, "shorten");
+  assert.equal(suggestions[0]?.suggestedDurationMinutes, 45);
+});
+
+test("daily schedule adjustment replaces non-urgent deep work with lower-load task", () => {
+  const suggestions = buildTodayScheduleAdjustmentSuggestions({
+    now: new Date("2026-05-11T09:00:00-07:00"),
+    checkin: {
+      id: "checkin",
+      energyScore: 2,
+      stressScore: 6,
+      availableCapacityMinutes: null,
+      planningCycleId: "cycle",
+    },
+    replacementTasks: [
+      {
+        id: "task_light",
+        title: "Email professor",
+        priority: 3,
+        cognitiveLoad: 2,
+        dueAt: null,
+        estimatedMinutes: 20,
+      },
+    ],
+    blocks: [
+      {
+        id: "block_project",
+        taskId: "task_project",
+        title: "CS project architecture",
+        startTime: new Date("2026-05-11T14:00:00-07:00"),
+        endTime: new Date("2026-05-11T15:00:00-07:00"),
+        status: "proposed",
+        task: {
+          id: "task_project",
+          title: "CS project",
+          priority: 4,
+          cognitiveLoad: 6,
+          dueAt: new Date("2026-05-20T23:59:00-07:00"),
+          estimatedMinutes: 240,
+          workType: "project",
+        },
+      },
+    ],
+  });
+
+  assert.equal(suggestions[0]?.action, "replace_with_lower_load_task");
+  assert.equal(suggestions[0]?.replacementTask?.id, "task_light");
 });
 
 test("dashboard date validation accepts only valid YYYY-MM-DD dates", () => {

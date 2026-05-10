@@ -65,7 +65,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Task difficulty exists as `cognitiveLoad`; backend/chat inference and task-page manual controls are started.
 - [x] Task breakdown supports small-task one-step output, large-task splitting, work-type templates, and preserve-vs-replace behavior.
 - [x] Schedule read/update APIs exist, and MVP schedule generation is implemented.
-- [ ] Daily adjustment exists, but does not yet rewrite or propose concrete block changes.
+- [x] Daily adjustment returns concrete keep, shorten, move, skip, and replacement suggestions based on check-ins.
 - [x] Daily check-in can be submitted from the Today dashboard and chat.
 - [x] Daily check-in natural-language mapping works for both exact scores and common stress/energy phrases.
 - [x] API docs exist and include current task, calendar, schedule, dashboard, chat, upload, and insight contracts.
@@ -160,21 +160,21 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Daily Adjustment
 
-- [ ] Improve `POST /api/schedule/adjust-today`.
-- [ ] Use latest daily check-in when available.
-- [ ] If `energyScore <= 2` or `stressScore >= 6`, prefer:
-  - [ ] shorter blocks
-  - [ ] lower cognitive load
-  - [ ] urgent tasks only
-  - [ ] preserve fixed calendar events
-- [ ] Return concrete proposed adjustments:
-  - [ ] keep
-  - [ ] shorten
-  - [ ] move
-  - [ ] skip
-  - [ ] replace with lower-load task
-- [ ] Do not mutate accepted blocks without confirmation.
-- [ ] Create `AiInsight` explaining the adjustment.
+- [x] Improve `POST /api/schedule/adjust-today`.
+- [x] Use latest daily check-in when available.
+- [x] If `energyScore <= 2` or `stressScore >= 6`, prefer:
+  - [x] shorter blocks
+  - [x] lower cognitive load
+  - [x] urgent tasks only
+  - [x] preserve fixed calendar events
+- [x] Return concrete proposed adjustments:
+  - [x] keep
+  - [x] shorten
+  - [x] move
+  - [x] skip
+  - [x] replace with lower-load task
+- [x] Do not mutate accepted blocks without confirmation.
+- [x] Create `AiInsight` explaining the adjustment.
 
 ## Priority 1: Real Google Calendar Connection
 

@@ -1040,13 +1040,17 @@ Response:
 
 ### POST `/api/schedule/adjust-today`
 
-Returns simple MVP adjustment suggestions for today.
+Returns concrete MVP adjustment suggestions for today.
 
 Behavior:
 
+- Uses the latest daily check-in for today when present.
+- Low energy (`energyScore <= 2`) or high stress (`stressScore >= 6`) triggers lighter-plan suggestions.
 - Looks at today's user-scoped scheduled blocks.
-- Finds blocks tied to tasks with `cognitiveLoad >= 6`.
-- Returns simple suggestions to shorten, move, or swap demanding work.
+- Preserves fixed calendar events because this endpoint only suggests changes to scheduled task blocks.
+- Returns concrete actions: `keep`, `shorten`, `move`, `skip`, or `replace_with_lower_load_task`.
+- Suggests lower-load replacement tasks when possible.
+- Creates or updates a daily `AiInsight` explaining the adjustment.
 - Does not rewrite the schedule automatically.
 
 Response:
@@ -1055,17 +1059,31 @@ Response:
 {
   "data": {
     "date": "2026-05-09",
-    "summary": "High cognitive-load blocks found for today.",
+    "summary": "Today's check-in suggests a lighter plan with concrete schedule adjustments.",
+    "actionCounts": {
+      "shorten": 1
+    },
     "suggestedAdjustments": [
       {
+        "action": "shorten",
         "scheduledBlockId": "block-id",
         "taskId": "task-id",
         "title": "Chem midterm practice set",
         "currentStartTime": "2026-05-09T20:00:00.000Z",
         "currentEndTime": "2026-05-09T21:30:00.000Z",
+        "currentDurationMinutes": 90,
+        "suggestedDurationMinutes": 45,
         "cognitiveLoad": 7,
-        "suggestion": "Consider shortening this block, moving it later, or replacing it with a lower-load task if today's check-in is low energy or high stress."
+        "priority": 1,
+        "reason": "This is urgent but demanding. Keep it on the plan, but shorten it into a more realistic focus block today."
       }
-    ]
+    ],
+    "insight": {
+      "insightType": "daily_schedule_adjustment",
+      "title": "Lighten today's plan",
+      "severity": "caution"
+    }
   }
 }
+
+```
