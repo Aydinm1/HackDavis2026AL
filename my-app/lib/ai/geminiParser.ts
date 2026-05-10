@@ -1,5 +1,7 @@
-import { GoogleGenAI, type Part } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, type GenerateContentConfig, type Part } from "@google/genai";
 import { parseMockChatMessage, type MockParsedAction } from "@/lib/ai/mockParser";
+
+const DEFAULT_GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
 
 const VALID_ACTION_TYPES = new Set([
   "CREATE_TASK",
@@ -101,6 +103,30 @@ export function validateGeminiResponse(raw: unknown): MockParsedAction[] {
 
 let ai: GoogleGenAI | null = null;
 
+function parseModelList(value: string | undefined) {
+  return value
+    ?.split(",")
+    .map((model) => model.trim())
+    .filter(Boolean) ?? [];
+}
+
+function getGeminiModels() {
+  const configuredModels = [
+    ...parseModelList(process.env.GEMINI_MODEL),
+    ...parseModelList(process.env.GEMINI_FALLBACK_MODELS),
+  ];
+
+  return configuredModels.length > 0 ? configuredModels : DEFAULT_GEMINI_MODELS;
+}
+
+function getThinkingConfig(modelName: string): GenerateContentConfig["thinkingConfig"] {
+  if (modelName.startsWith("gemini-3")) {
+    return { thinkingLevel: ThinkingLevel.MINIMAL };
+  }
+
+  return { thinkingBudget: 0 };
+}
+
 function getGeminiClient() {
   ai ??= new GoogleGenAI({
     vertexai: true,
@@ -119,7 +145,7 @@ async function callGemini(modelName: string, systemInstruction: string, parts: P
       systemInstruction,
       responseMimeType: "application/json",
       responseSchema,
-      thinkingConfig: { thinkingBudget: 0 },
+      thinkingConfig: getThinkingConfig(modelName),
     },
   });
   return response.text ?? "";
@@ -132,7 +158,7 @@ async function callGeminiTranscribe(modelName: string, parts: Part[]): Promise<s
     config: {
       systemInstruction:
         "You are a transcription service. Listen to the audio and return ONLY the verbatim transcript of what was said. Do not add any commentary, formatting, or JSON. Just the spoken words.",
-      thinkingConfig: { thinkingBudget: 0 },
+      thinkingConfig: getThinkingConfig(modelName),
     },
   });
   return (response.text ?? "").trim();
@@ -155,7 +181,7 @@ You support exactly 6 action types:
 For CREATE_TASK, extract:
 - title (required): concise task name
 - dueAt: ISO 8601 datetime string if a deadline is mentioned (resolve relative dates like "tomorrow", "Friday" using today's date)
-- priority: integer 1–7 (1=highest, 7=lowest). Infer from urgency language.
+- priority: integer 1–5 (1=highest, 5=lowest). Infer from urgency language.
 - cognitiveLoad: integer 1–7 (1=easy, 7=very demanding). Infer from complexity.
 - type: one of "school", "work", "personal", "health", "chores"
 - workType: one of "focus", "study", "admin", "creative", "physical"
@@ -190,6 +216,7 @@ For ADJUST_TODAY, extract:
 Rules:
 - Return an empty array [] ONLY for pure greetings or read-only questions. If there is ANY hint of a task, event, plan, or activity — extract it.
 - Return an empty array [] for read-only questions like "what do I have to do Monday", "what is my highest priority task Monday", or "show my top task Friday". Do not turn those into GENERATE_SCHEDULE.
+- If the previous assistant proposed an ambiguous CREATE_TASK and the user is supplying missing fields like difficulty, priority, or duration, return a CREATE_TASK with the merged fields, not UPDATE_TASK. UPDATE_TASK is only for tasks that already exist in the database.
 - Never refuse to parse something because the wording sounds unusual, informal, or colloquial. Take the user at their word and extract the best-fit action.
 - Interpret all colloquial, slang, and informal expressions as social plans or tasks. "beat [someone] up", "link up", "hang with", "kick it with", "chill with", "vibe with", "pull up on", "see [someone]" all mean meeting/socializing → CREATE_EVENT.
 - Social plans with a time are CREATE_EVENT with a descriptive title using the person's name (e.g. "Hang with Raghav").
@@ -200,7 +227,7 @@ Rules:
 - Write a short, friendly assistantSummary confirming or clarifying the action.
 - Do not hallucinate tasks that have no basis in the message.`;
 
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const models = getGeminiModels();
 
   for (const model of models) {
     try {
@@ -252,7 +279,7 @@ You support exactly 6 action types:
 For CREATE_TASK, extract:
 - title (required): concise task name
 - dueAt: ISO 8601 datetime string if a deadline is mentioned (resolve relative dates using today's date)
-- priority: integer 1–7 (1=highest, 7=lowest)
+- priority: integer 1–5 (1=highest, 5=lowest)
 - cognitiveLoad: integer 1–7 (1=easy, 7=very demanding)
 - type: one of "school", "work", "personal", "health", "chores"
 - workType: one of "focus", "study", "admin", "creative", "physical"
@@ -286,6 +313,7 @@ For ADJUST_TODAY, extract:
 
 Rules:
 - Return an empty array [] if no actionable intent is found.
+- If the previous assistant proposed an ambiguous CREATE_TASK and the user is supplying missing fields like difficulty, priority, or duration, return a CREATE_TASK with the merged fields, not UPDATE_TASK. UPDATE_TASK is only for tasks that already exist in the database.
 - Set ambiguous: true if required fields are missing. DAILY_CHECKIN requires both energyScore and stressScore.
 - Set requiresConfirmation: true for UPDATE_TASK and ambiguous actions.
 - Set requiresConfirmation: false for complete DAILY_CHECKIN actions.
@@ -298,7 +326,7 @@ Rules:
       ? `You are listening to a voice memo. Transcribe the intent and extract structured actions (tasks, events, schedule requests). Today is ${today}.${actionRules}`
       : `You are analyzing an image the user uploaded (e.g. a schedule, to-do list, whiteboard, screenshot). Extract all tasks or events you can see. Today is ${today}.${actionRules}`;
 
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const models = getGeminiModels();
 
   for (const model of models) {
     try {
@@ -334,7 +362,7 @@ Rules:
 export async function parseGeminiVoice(
   parts: Part[]
 ): Promise<{ transcript: string; actions: MockParsedAction[] }> {
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const models = getGeminiModels();
 
   // Step 1: plain transcription (no JSON schema — avoids schema-key bleed)
   let transcript = "";

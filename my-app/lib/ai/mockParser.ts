@@ -316,15 +316,43 @@ export function parseMockChatMessage(content: string): MockParsedAction[] {
         : "Which task should I complete?",
     });
   } else if (/\bmove\b/i.test(text)) {
+    const hasFieldKeywords = /\b(?:difficulty|cognitive(?:\s*load)?|priority|\d+\s*(?:min|h(?:ou?r)?s?))\b/i.test(text);
+    if (hasFieldKeywords) {
+      const title = parseTaskTitle(text);
+      actions.push({
+        actionType: "UPDATE_TASK",
+        requiresConfirmation: true,
+        ambiguous: !title,
+        inputPayload: { operation: "update_fields", title, rawText: text },
+        assistantSummary: title
+          ? `I'll update the fields for "${title}". Please confirm.`
+          : "Which task should I update?",
+      });
+    } else {
+      actions.push({
+        actionType: "UPDATE_TASK",
+        requiresConfirmation: true,
+        ambiguous: true,
+        inputPayload: { operation: "move", rawText: text },
+        assistantSummary: "Which task or block should I move, and what new time should it use?",
+      });
+    }
+  }
+
+  // "set difficulty 7 on CS homework" / "update priority 2 for CS homework" / "change CS homework difficulty to 3"
+  if (
+    /\b(?:set|update|change)\b.*\b(?:difficulty|cognitive(?:\s*load)?|priority|estimated|minutes)\b/i.test(text) ||
+    /\b(?:difficulty|cognitive(?:\s*load)?|priority)\s*[:=]?\s*\d+\b/i.test(text)
+  ) {
+    const title = parseTaskTitle(text);
     actions.push({
       actionType: "UPDATE_TASK",
       requiresConfirmation: true,
-      ambiguous: true,
-      inputPayload: {
-        operation: "move",
-        rawText: text,
-      },
-      assistantSummary: "Which task or block should I move, and what new time should it use?",
+      ambiguous: !title,
+      inputPayload: { operation: "update_fields", title, rawText: text },
+      assistantSummary: title
+        ? `I'll update the fields for "${title}". Please confirm.`
+        : "Which task should I update the fields for?",
     });
   }
 

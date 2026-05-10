@@ -73,6 +73,15 @@ const ACTION_COLORS: Record<string, string> = {
   ADJUST_TODAY: "bg-teal-100 text-teal-800 border-teal-200",
 };
 
+const ACTION_LABELS: Record<string, string> = {
+  CREATE_TASK: "Create task",
+  CREATE_EVENT: "Create event",
+  UPDATE_TASK: "Update task",
+  GENERATE_SCHEDULE: "Generate schedule",
+  DAILY_CHECKIN: "Daily check-in",
+  ADJUST_TODAY: "Adjust today",
+};
+
 type AdjustmentAction = "keep" | "shorten" | "move" | "skip" | "replace_with_lower_load_task";
 
 const ADJUSTMENT_BADGE_COLORS: Record<AdjustmentAction, string> = {
@@ -139,8 +148,9 @@ function ActionCard({
   const [draftError, setDraftError] = useState<string | null>(null);
   const p = action.inputPayload;
   const colorClass = ACTION_COLORS[action.actionType] ?? "bg-zinc-100 text-zinc-700 border-zinc-200";
+  const actionLabel = ACTION_LABELS[action.actionType] ?? action.actionType;
   const statusClass = STATUS_COLORS[action.status] ?? "bg-zinc-100 text-zinc-500";
-  const canConfirm = action.status === "proposed" && !p.ambiguous;
+  const canConfirm = action.status === "proposed";
   const canCancel = action.status === "proposed";
   const followUpAction = extractFollowUpAction(action);
 
@@ -174,7 +184,7 @@ function ActionCard({
   return (
     <div className={`rounded-lg border p-3 space-y-2 ${colorClass}`}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold tracking-wide">{action.actionType}</span>
+        <span className="text-xs font-bold tracking-wide">{actionLabel}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusClass}`}>
           {action.status}
         </span>
@@ -431,6 +441,8 @@ export default function ChatPage() {
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyIndexRef = useRef<number>(-1);
+  const savedInputRef = useRef<string>("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -689,7 +701,27 @@ export default function ChatPage() {
         }
         const { thread, assistantMessage, actions } = json.data;
         setThreadId(thread.id);
-        setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage.content, actions }]);
+        setMessages((prev) => {
+          const existingIds = new Set(prev.flatMap((m) => m.actions?.map((a) => a.id) ?? []));
+          const existingUpdates = actions.filter((a) => existingIds.has(a.id));
+          const brandNewActions = actions.filter((a) => !existingIds.has(a.id));
+
+          const updated = existingUpdates.length > 0
+            ? prev.map((msg) => ({
+                ...msg,
+                actions: msg.actions?.map((ea) => existingUpdates.find((u) => u.id === ea.id) ?? ea),
+              }))
+            : prev;
+
+          return [
+            ...updated,
+            {
+              role: "assistant" as const,
+              content: assistantMessage.content,
+              actions: brandNewActions.length > 0 ? brandNewActions : undefined,
+            },
+          ];
+        });
       }
     } catch {
       setMessages((prev) => [
@@ -705,7 +737,44 @@ export default function ChatPage() {
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      historyIndexRef.current = -1;
       void send(input);
+      return;
+    }
+
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      const ta = textareaRef.current;
+      if (!ta) return;
+
+      const sentMessages = messages.filter((m) => m.role === "user" && m.content).map((m) => m.content);
+      if (sentMessages.length === 0) return;
+
+      // Only hijack up arrow when cursor is on the first line
+      if (e.key === "ArrowUp") {
+        const atTop = ta.selectionStart === 0 || !ta.value.includes("\n");
+        if (!atTop) return;
+
+        e.preventDefault();
+        if (historyIndexRef.current === -1) savedInputRef.current = input;
+        const nextIndex = Math.min(historyIndexRef.current + 1, sentMessages.length - 1);
+        historyIndexRef.current = nextIndex;
+        setInput(sentMessages[sentMessages.length - 1 - nextIndex]);
+      } else {
+        // ArrowDown — only active while browsing history
+        if (historyIndexRef.current === -1) return;
+        const atBottom = ta.selectionStart === ta.value.length || !ta.value.includes("\n");
+        if (!atBottom) return;
+
+        e.preventDefault();
+        const nextIndex = historyIndexRef.current - 1;
+        if (nextIndex < 0) {
+          historyIndexRef.current = -1;
+          setInput(savedInputRef.current);
+        } else {
+          historyIndexRef.current = nextIndex;
+          setInput(sentMessages[sentMessages.length - 1 - nextIndex]);
+        }
+      }
     }
   }
 

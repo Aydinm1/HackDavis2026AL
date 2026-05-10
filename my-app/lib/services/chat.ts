@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { parseGeminiChatMessage } from "@/lib/ai/geminiParser";
+import { parseWithBackboard } from "@/lib/ai/backboardClient";
 import {
   inferDailyEnergyScore,
   inferDailyStressScore,
@@ -145,6 +146,34 @@ function parseEstimatedMinutes(text: string) {
   if (/\bquick|simple|easy\b/i.test(text)) return 30;
 
   return undefined;
+}
+
+export function getMissingCreateTaskPlanningFields(payload: Record<string, unknown>) {
+  const missing: string[] = [];
+
+  if (typeof payload.title !== "string" || !payload.title.trim()) {
+    missing.push("title");
+  }
+
+  if (typeof payload.cognitiveLoad !== "number") {
+    missing.push("difficulty");
+  }
+
+  return missing;
+}
+
+function isPendingCreateTaskPayload(payload: Record<string, unknown>) {
+  return payload.ambiguous === true || getMissingCreateTaskPlanningFields(payload).length > 0;
+}
+
+function formatFieldList(fields: string[]) {
+  if (fields.length <= 1) return fields[0] ?? "";
+  if (fields.length === 2) return `${fields[0]} and ${fields[1]}`;
+  return `${fields.slice(0, -1).join(", ")}, and ${fields[fields.length - 1]}`;
+}
+
+function hasExistingTaskUpdateIntent(text: string) {
+  return /\b(?:actually|change|update|make|set|switch|adjust)\b/i.test(text);
 }
 
 function parsePriorityFromText(text: string) {
@@ -464,7 +493,7 @@ function normalizeCreateTaskAction(action: MockParsedAction, originalText: strin
     ? payload.title.trim()
     : inferredTitle ?? "";
 
-  const missingPlanningInputs = !estimatedMinutes || !cognitiveLoad;
+  const missingPlanningInputs = !cognitiveLoad;
   const requiresReview = action.requiresConfirmation || missingPlanningInputs || isImplicitStudyTask(originalText);
   const breakdownPreview = estimatedMinutes && cognitiveLoad
     ? buildBreakdownPreview(workType, estimatedMinutes, cognitiveLoad)
@@ -492,7 +521,7 @@ function normalizeCreateTaskAction(action: MockParsedAction, originalText: strin
       breakdownPreview,
     },
     assistantSummary: missingPlanningInputs
-      ? `I can create "${title || "that task"}", but I need estimated time and difficulty before adding it.`
+      ? `I can create "${title || "that task"}", but I need difficulty before adding it.`
       : requiresReview
         ? `I estimated "${title}" as ${estimatedMinutes} minutes with difficulty ${cognitiveLoad}/7 and prepared a ${breakdownPreview?.length ?? 0}-step breakdown. Please confirm before I add it.${scheduleImpactText}`
         : `${action.assistantSummary}${scheduleImpactText}`,
@@ -898,33 +927,59 @@ async function executeUpdateTask(userId: string, action: MockParsedAction) {
   const payload = action.inputPayload;
   const operation = typeof payload.operation === "string" ? payload.operation : "";
 
-  if (operation !== "complete") {
-    throw new Error("This update needs clarification before it can run.");
+  // ── complete ──────────────────────────────────────────────────────────────
+  if (operation === "complete") {
+    const title = typeof payload.title === "string" ? payload.title.trim() : "";
+    if (!title) throw new Error("Task title is required to complete a task.");
+
+    const candidates = await prisma.task.findMany({
+      where: { userId, status: { notIn: ["completed", "cancelled"] } },
+    });
+    const task = candidates.find((c) => c.title.toLowerCase().includes(title.toLowerCase()));
+    if (!task) throw new Error(`No incomplete task matched "${title}".`);
+
+    const updatedTask = await prisma.task.update({ where: { id: task.id }, data: { status: "completed" } });
+    return { task: updatedTask };
   }
 
-  const title = typeof payload.title === "string" ? payload.title.trim() : "";
-  if (!title) {
-    throw new Error("Task title is required to complete a task.");
+  // ── update_fields (also handles legacy "move" payloads with field data) ───
+  if (operation === "update_fields" || operation === "move") {
+    const taskId = typeof payload.taskId === "string" ? payload.taskId : "";
+    const title = typeof payload.title === "string" ? payload.title.trim() : "";
+    if (!taskId && !title) throw new Error("Task title is required to update task fields.");
+
+    // Fields can come from direct payload keys OR be embedded in rawText
+    const rawText = typeof payload.rawText === "string" ? payload.rawText : "";
+    const fromRaw = rawText ? extractFieldUpdates(rawText) : {};
+
+    const data: Record<string, unknown> = {
+      ...fromRaw,
+      // Direct keys win over raw extraction
+      ...(typeof payload.cognitiveLoad === "number" ? { cognitiveLoad: payload.cognitiveLoad } : {}),
+      ...(typeof payload.priority === "number" ? { priority: payload.priority } : {}),
+      ...(typeof payload.estimatedMinutes === "number" ? { estimatedMinutes: payload.estimatedMinutes } : {}),
+      ...(typeof payload.dueAt === "string" ? { dueAt: new Date(payload.dueAt) } : {}),
+    };
+
+    if (Object.keys(data).length === 0) {
+      throw new Error("No field updates found. Specify what to change (e.g. difficulty 7, priority 2).");
+    }
+
+    const task = taskId
+      ? await prisma.task.findFirst({
+          where: { id: taskId, userId, status: { notIn: ["completed", "cancelled"] } },
+        })
+      : (await prisma.task.findMany({
+          where: { userId, status: { notIn: ["completed", "cancelled"] } },
+        })).find((c) => c.title.toLowerCase().includes(title.toLowerCase()));
+
+    if (!task) throw new Error(`No incomplete task matched "${title}".`);
+
+    const updatedTask = await prisma.task.update({ where: { id: task.id }, data });
+    return { task: updatedTask };
   }
 
-  const candidates = await prisma.task.findMany({
-    where: {
-      userId,
-      status: { notIn: ["completed", "cancelled"] },
-    },
-  });
-  const task = candidates.find((candidate) => candidate.title.toLowerCase().includes(title.toLowerCase()));
-
-  if (!task) {
-    throw new Error(`No incomplete task matched "${title}".`);
-  }
-
-  const updatedTask = await prisma.task.update({
-    where: { id: task.id },
-    data: { status: "completed" },
-  });
-
-  return { task: updatedTask };
+  throw new Error("This update needs clarification before it can run.");
 }
 
 async function executeGenerateSchedule(userId: string, action: MockParsedAction) {
@@ -1056,6 +1111,104 @@ function buildAssistantResponse(actions: MockParsedAction[]) {
   return actions.map((action) => action.assistantSummary).join(" ");
 }
 
+function extractFieldUpdates(text: string): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  const t = text.toLowerCase();
+
+  const cogMatch = t.match(/\b(?:difficulty|cognitive(?:\s*load)?)\s*[:=]?\s*(\d+)/);
+  if (cogMatch) fields.cognitiveLoad = clampInteger(parseInt(cogMatch[1]), 1, 7);
+
+  const prioMatch = t.match(/\bpriority\s*[:=]?\s*(\d+)/);
+  if (prioMatch) fields.priority = clampInteger(parseInt(prioMatch[1]), 1, 5);
+
+  const hrMatch = t.match(/\b(\d+(?:\.\d+)?)\s*h(?:ou?r)?s?\b/);
+  const minMatch = t.match(/\b(\d+)\s*min(?:ute)?s?\b/);
+  if (hrMatch) fields.estimatedMinutes = clampInteger(Math.round(parseFloat(hrMatch[1]) * 60), 15, 720);
+  else if (minMatch) fields.estimatedMinutes = clampInteger(parseInt(minMatch[1]), 15, 720);
+
+  const dueMatch = t.match(/\bdue\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i)
+    ?? t.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
+  if (dueMatch) {
+    const parsed = new Date(`${new Date().toDateString()} ${dueMatch[1]}`);
+    if (!isNaN(parsed.getTime())) fields.dueAt = parsed.toISOString();
+  }
+
+  return fields;
+}
+
+export function mergePendingCreateTaskPayload(currentPayload: Record<string, unknown>, userText: string) {
+  const extracted = extractFieldUpdates(userText);
+  if (Object.keys(extracted).length === 0) {
+    return null;
+  }
+
+  const mergedPayload = { ...currentPayload, ...extracted };
+  const missingFields = getMissingCreateTaskPlanningFields(mergedPayload);
+  const ambiguous = missingFields.length > 0;
+  const fieldNames = Object.keys(extracted).map((field) => {
+    if (field === "cognitiveLoad") return "difficulty";
+    if (field === "estimatedMinutes") return "estimated time";
+    if (field === "dueAt") return "due time";
+    return field;
+  });
+  const taskTitle = typeof mergedPayload.title === "string" && mergedPayload.title.trim()
+    ? ` for "${mergedPayload.title.trim()}"`
+    : "";
+  const assistantMessage = ambiguous
+    ? `Got it — updated ${formatFieldList(fieldNames)}${taskTitle}. I still need ${formatFieldList(missingFields)} before I add it.`
+    : `Got it — updated ${formatFieldList(fieldNames)}${taskTitle}. Review and confirm below.`;
+
+  const payload: Record<string, unknown> = {
+    ...mergedPayload,
+    ambiguous,
+  };
+
+  return {
+    payload,
+    missingFields,
+    assistantMessage,
+  };
+}
+
+function getExecutedTaskFromActionPayload(resultPayload: unknown) {
+  if (!isRecord(resultPayload) || !isRecord(resultPayload.task)) {
+    return null;
+  }
+
+  const task = resultPayload.task;
+  if (typeof task.id !== "string" || typeof task.title !== "string") {
+    return null;
+  }
+
+  return {
+    id: task.id,
+    title: task.title,
+  };
+}
+
+export function buildFollowUpTaskUpdatePayload(
+  task: { id: string; title: string },
+  userText: string,
+): Record<string, unknown> | null {
+  if (!hasExistingTaskUpdateIntent(userText)) {
+    return null;
+  }
+
+  const fieldUpdates = extractFieldUpdates(userText);
+  if (Object.keys(fieldUpdates).length === 0) {
+    return null;
+  }
+
+  return {
+    taskId: task.id,
+    title: task.title,
+    operation: "update_fields",
+    rawText: userText,
+    ambiguous: false,
+    ...fieldUpdates,
+  };
+}
+
 export async function handleChatMessage(userId: string, input: ChatMessageInput) {
   const thread = await getOrCreateThread(userId, input);
 
@@ -1099,7 +1252,100 @@ export async function handleChatMessage(userId: string, input: ChatMessageInput)
     };
   }
 
-  const parsedActions = normalizeParsedActions(await parseGeminiChatMessage(input.content), input.content);
+  const latestExecutedCreateTask = await prisma.aiAction.findFirst({
+    where: { userId, threadId: thread.id, status: "executed", actionType: "CREATE_TASK" },
+    orderBy: { executedAt: "desc" },
+  });
+  const latestCreatedTask = getExecutedTaskFromActionPayload(latestExecutedCreateTask?.resultPayload);
+  const recentTaskForUpdate = latestCreatedTask;
+  const followUpTaskUpdatePayload = recentTaskForUpdate
+    ? buildFollowUpTaskUpdatePayload(recentTaskForUpdate, input.content)
+    : null;
+
+  if (recentTaskForUpdate && followUpTaskUpdatePayload) {
+    const updatedFields = Object.keys(followUpTaskUpdatePayload)
+      .filter((field) => ["priority", "cognitiveLoad", "estimatedMinutes", "dueAt"].includes(field))
+      .map((field) => {
+        if (field === "cognitiveLoad") return "difficulty";
+        if (field === "estimatedMinutes") return "estimated time";
+        if (field === "dueAt") return "due time";
+        return field;
+      });
+    const action = await prisma.aiAction.create({
+      data: {
+        userId,
+        threadId: thread.id,
+        messageId: userMessage.id,
+        actionType: "UPDATE_TASK",
+        status: "proposed",
+        requiresConfirmation: true,
+        inputPayload: jsonObject(followUpTaskUpdatePayload),
+      },
+    });
+    const assistantMessage = await prisma.chatMessage.create({
+      data: {
+        userId,
+        threadId: thread.id,
+        role: "assistant",
+        content: `Got it — I can update ${formatFieldList(updatedFields)} for "${recentTaskForUpdate.title}". Review and confirm below.`,
+        metadata: jsonObject({ actionIds: [action.id] }),
+      },
+    });
+
+    await prisma.chatThread.update({ where: { id: thread.id }, data: { updatedAt: new Date() } });
+
+    return {
+      ok: true as const,
+      value: { thread, userMessage, assistantMessage, actions: [action] },
+    };
+  }
+
+  // If there's a pending ambiguous proposed action in this thread, try to
+  // extract field updates from the user's message and merge them in directly —
+  // no AI needed for this case.
+  const pendingAmbiguous = await prisma.aiAction.findFirst({
+    where: { userId, threadId: thread.id, status: "proposed", actionType: "CREATE_TASK" },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const pendingPayload = pendingAmbiguous?.inputPayload as Record<string, unknown> | undefined;
+  if (pendingAmbiguous && pendingPayload && isPendingCreateTaskPayload(pendingPayload)) {
+    const merged = mergePendingCreateTaskPayload(pendingPayload, input.content);
+    if (merged) {
+      const requiresConfirmation = true;
+
+      const updatedAction = await prisma.aiAction.update({
+        where: { id: pendingAmbiguous.id },
+        data: {
+          inputPayload: jsonObject(merged.payload),
+          requiresConfirmation,
+          errorMessage: null,
+        },
+      });
+
+      const assistantMessage = await prisma.chatMessage.create({
+        data: {
+          userId,
+          threadId: thread.id,
+          role: "assistant",
+          content: merged.assistantMessage,
+          metadata: jsonObject({ actionIds: [updatedAction.id] }),
+        },
+      });
+
+      await prisma.chatThread.update({ where: { id: thread.id }, data: { updatedAt: new Date() } });
+
+      return {
+        ok: true as const,
+        value: { thread, userMessage, assistantMessage, actions: [updatedAction] },
+      };
+    }
+  }
+
+  const rawActions = process.env.BACKBOARD_API_KEY
+    ? await parseWithBackboard(input.content, thread.id)
+    : await parseGeminiChatMessage(input.content);
+  const parsedActions = normalizeParsedActions(rawActions, input.content);
   const shouldPromptForCheckin =
     isPlanningRequest(input.content) &&
     !parsedActions.some((action) => action.actionType === "DAILY_CHECKIN") &&
@@ -1202,9 +1448,30 @@ export async function confirmAiAction(
   const inputPayload = {
     ...(aiAction.inputPayload as Record<string, unknown>),
     ...(overrides.inputPayload ?? {}),
+    ambiguous: false,
   };
-  if (inputPayload.ambiguous) {
-    return { ok: false as const, error: "AI action needs clarification before it can be confirmed.", status: 400 };
+
+  if (aiAction.actionType === "CREATE_TASK") {
+    const missingFields = getMissingCreateTaskPlanningFields(inputPayload);
+    if (missingFields.length > 0) {
+      await prisma.aiAction.update({
+        where: { id: aiAction.id },
+        data: {
+          inputPayload: jsonObject({
+            ...inputPayload,
+            ambiguous: true,
+          }),
+          requiresConfirmation: true,
+          errorMessage: null,
+        },
+      });
+
+      return {
+        ok: false as const,
+        error: `${formatFieldList(missingFields)} ${missingFields.length === 1 ? "is" : "are"} required before creating this task.`,
+        status: 400,
+      };
+    }
   }
 
   try {
