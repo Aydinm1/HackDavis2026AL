@@ -22,6 +22,7 @@ let validateCalendarRange: typeof CalendarEventsService.validateCalendarRange;
 let validateCreateCalendarEventBody: typeof CalendarEventsService.validateCreateCalendarEventBody;
 let validatePatchCalendarEventBody: typeof CalendarEventsService.validatePatchCalendarEventBody;
 let validateDailyCheckinBody: typeof CheckinsService.validateDailyCheckinBody;
+let validateCheckinLogBody: typeof CheckinsService.validateCheckinLogBody;
 let buildTodayScheduleAdjustmentSuggestions: typeof CheckinsService.buildTodayScheduleAdjustmentSuggestions;
 let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let resolveNextWeekdayDate: typeof ChatService.resolveNextWeekdayDate;
@@ -57,6 +58,7 @@ before(async () => {
   validateCreateCalendarEventBody = calendarEventsService.validateCreateCalendarEventBody;
   validatePatchCalendarEventBody = calendarEventsService.validatePatchCalendarEventBody;
   validateDailyCheckinBody = checkinsService.validateDailyCheckinBody;
+  validateCheckinLogBody = checkinsService.validateCheckinLogBody;
   buildTodayScheduleAdjustmentSuggestions = checkinsService.buildTodayScheduleAdjustmentSuggestions;
   validateChatMessageBody = chatService.validateChatMessageBody;
   resolveNextWeekdayDate = chatService.resolveNextWeekdayDate;
@@ -420,6 +422,45 @@ test("daily check-in validation rejects mood and sleep fields", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.ok ? "" : result.error, /Unsupported field/);
+});
+
+test("check-in log validation accepts repeated stress and energy entries", () => {
+  const result = validateCheckinLogBody({
+    planningCycleId: "demo_cycle_2026_05_11",
+    loggedAt: "2026-05-11T15:45:00-07:00",
+    energyScore: 3,
+    stressScore: 6,
+    availableCapacityMinutes: 60,
+    userNote: "Afternoon energy dip.",
+    adjustToday: true,
+    source: "manual",
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.ok(result.value.loggedAt instanceof Date);
+    assert.equal(result.value.energyScore, 3);
+    assert.equal(result.value.stressScore, 6);
+    assert.equal(result.value.source, "manual");
+  }
+});
+
+test("check-in log validation rejects mood and out-of-range scores", () => {
+  const mood = validateCheckinLogBody({
+    loggedAt: "2026-05-11T15:45:00-07:00",
+    energyScore: 3,
+    stressScore: 6,
+    mood: "jaded",
+  });
+  const invalidScore = validateCheckinLogBody({
+    energyScore: 8,
+    stressScore: 6,
+  });
+
+  assert.equal(mood.ok, false);
+  assert.match(mood.ok ? "" : mood.error, /Unsupported field/);
+  assert.equal(invalidScore.ok, false);
+  assert.match(invalidScore.ok ? "" : invalidScore.error, /energyScore must be at most 7/);
 });
 
 test("daily schedule adjustment shortens urgent high-load blocks during overload", () => {

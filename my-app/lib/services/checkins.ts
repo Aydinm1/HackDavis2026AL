@@ -3,12 +3,25 @@ import { prisma } from "@/lib/db";
 const allowedDailyCheckinFields = [
   "planningCycleId",
   "checkinDate",
+  "loggedAt",
   "energyScore",
   "stressScore",
   "availableCapacityMinutes",
   "userNote",
   "adjustToday",
+  "source",
 ] as const;
+const allowedCheckinLogFields = [
+  "planningCycleId",
+  "loggedAt",
+  "energyScore",
+  "stressScore",
+  "availableCapacityMinutes",
+  "userNote",
+  "adjustToday",
+  "source",
+] as const;
+const allowedCheckinLogSources = new Set(["manual", "chat", "voice", "image", "system"]);
 
 type ValidationResult<T> =
   | { ok: true; value: T }
@@ -17,11 +30,17 @@ type ValidationResult<T> =
 type DailyCheckinInput = {
   planningCycleId?: string | null;
   checkinDate: Date;
+  loggedAt?: Date;
   energyScore: number;
   stressScore: number;
   availableCapacityMinutes?: number | null;
   userNote?: string | null;
   adjustToday?: boolean;
+  source?: string;
+};
+
+type CheckinLogInput = Omit<DailyCheckinInput, "checkinDate"> & {
+  loggedAt: Date;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,6 +142,23 @@ function parseCheckinDate(value: unknown): ValidationResult<Date> {
   return { ok: true, value: date };
 }
 
+function parseOptionalDateTime(value: unknown, field: string): ValidationResult<Date | undefined> {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true, value: undefined };
+  }
+
+  if (typeof value !== "string") {
+    return { ok: false, error: `${field} must be an ISO date string.` };
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { ok: false, error: `${field} must be a valid ISO date string.` };
+  }
+
+  return { ok: true, value: parsed };
+}
+
 function rejectUnknownFields(body: Record<string, unknown>, allowedFields: readonly string[]) {
   const allowed = new Set(allowedFields);
   const unknown = Object.keys(body).filter((key) => !allowed.has(key));
@@ -156,6 +192,12 @@ function buildDailyInsight(input: DailyCheckinInput) {
     severity: "info",
     confidenceScore: 0.72,
   };
+}
+
+function startOfLocalDay(date: Date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
 }
 
 function getTodayRange() {
@@ -410,6 +452,9 @@ export function validateDailyCheckinBody(body: unknown): ValidationResult<DailyC
   const checkinDate = parseCheckinDate(body.checkinDate);
   if (!checkinDate.ok) return checkinDate;
 
+  const loggedAt = parseOptionalDateTime(body.loggedAt, "loggedAt");
+  if (!loggedAt.ok) return loggedAt;
+
   const energyScore = parseInteger(body.energyScore, "energyScore", { min: 1, max: 7 });
   if (!energyScore.ok) return energyScore;
 
@@ -436,31 +481,262 @@ export function validateDailyCheckinBody(body: unknown): ValidationResult<DailyC
   const adjustToday = parseBoolean(body.adjustToday, "adjustToday");
   if (!adjustToday.ok) return adjustToday;
 
+  const source = parseString(body.source, "source");
+  if (!source.ok) return source;
+  if (source.value && !allowedCheckinLogSources.has(source.value)) {
+    return { ok: false, error: "source must be manual, chat, voice, image, or system." };
+  }
+
   return {
     ok: true,
     value: {
       planningCycleId: planningCycleId.value,
       checkinDate: checkinDate.value,
+      loggedAt: loggedAt.value,
       energyScore: energyScore.value,
       stressScore: stressScore.value,
       availableCapacityMinutes: availableCapacityMinutes.value,
       userNote: userNote.value,
       adjustToday: adjustToday.value,
+      source: source.value,
     },
   };
 }
 
+export function validateCheckinLogBody(body: unknown): ValidationResult<CheckinLogInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "Request body must be a JSON object." };
+  }
+
+  const unknownFieldsError = rejectUnknownFields(body, allowedCheckinLogFields);
+  if (unknownFieldsError) {
+    return { ok: false, error: unknownFieldsError };
+  }
+
+  const planningCycleId = parseNullableString(body.planningCycleId, "planningCycleId");
+  if (!planningCycleId.ok) return planningCycleId;
+
+  const loggedAt = parseOptionalDateTime(body.loggedAt, "loggedAt");
+  if (!loggedAt.ok) return loggedAt;
+
+  const energyScore = parseInteger(body.energyScore, "energyScore", { min: 1, max: 7 });
+  if (!energyScore.ok) return energyScore;
+
+  const stressScore = parseInteger(body.stressScore, "stressScore", { min: 1, max: 7 });
+  if (!stressScore.ok) return stressScore;
+
+  if (energyScore.value === undefined || energyScore.value === null) {
+    return { ok: false, error: "energyScore is required." };
+  }
+
+  if (stressScore.value === undefined || stressScore.value === null) {
+    return { ok: false, error: "stressScore is required." };
+  }
+
+  const availableCapacityMinutes = parseInteger(body.availableCapacityMinutes, "availableCapacityMinutes", {
+    min: 0,
+    nullable: true,
+  });
+  if (!availableCapacityMinutes.ok) return availableCapacityMinutes;
+
+  const userNote = parseNullableString(body.userNote, "userNote");
+  if (!userNote.ok) return userNote;
+
+  const adjustToday = parseBoolean(body.adjustToday, "adjustToday");
+  if (!adjustToday.ok) return adjustToday;
+
+  const source = parseString(body.source, "source");
+  if (!source.ok) return source;
+  if (source.value && !allowedCheckinLogSources.has(source.value)) {
+    return { ok: false, error: "source must be manual, chat, voice, image, or system." };
+  }
+
+  return {
+    ok: true,
+    value: {
+      planningCycleId: planningCycleId.value,
+      loggedAt: loggedAt.value ?? new Date(),
+      energyScore: energyScore.value,
+      stressScore: stressScore.value,
+      availableCapacityMinutes: availableCapacityMinutes.value,
+      userNote: userNote.value,
+      adjustToday: adjustToday.value,
+      source: source.value,
+    },
+  };
+}
+
+async function validatePlanningCycle(userId: string, planningCycleId?: string | null) {
+  if (!planningCycleId) return { ok: true as const };
+
+  const cycle = await prisma.planningCycle.findFirst({
+    where: { id: planningCycleId, userId },
+    select: { id: true },
+  });
+
+  if (!cycle) {
+    return { ok: false as const, error: "planningCycleId was not found for this user.", status: 400 };
+  }
+
+  return { ok: true as const };
+}
+
+async function recentCheckinLogs(userId: string, start: Date, end: Date) {
+  return prisma.checkinLog.findMany({
+    where: {
+      userId,
+      loggedAt: { gte: start, lt: end },
+    },
+    orderBy: { loggedAt: "asc" },
+  });
+}
+
+async function createInsightForCheckinLog(params: {
+  userId: string;
+  input: DailyCheckinInput;
+  checkinId: string;
+  checkinLogId: string;
+  dayStart: Date;
+}) {
+  const dailyInsight = buildDailyInsight(params.input);
+  const dayEnd = new Date(params.dayStart.getTime() + 24 * 60 * 60_000);
+  const timeline = await recentCheckinLogs(params.userId, params.dayStart, dayEnd);
+
+  return prisma.aiInsight.upsert({
+    where: { id: `demo_daily_adjustment_${getDateKey(params.dayStart)}` },
+    update: {
+      planningCycleId: params.input.planningCycleId ?? null,
+      dailyCheckinId: params.checkinId,
+      checkinLogId: params.checkinLogId,
+      scope: "daily",
+      ...dailyInsight,
+      sourceData: {
+        energyScore: params.input.energyScore,
+        stressScore: params.input.stressScore,
+        availableCapacityMinutes: params.input.availableCapacityMinutes ?? null,
+        userNote: params.input.userNote ?? null,
+        checkinLogId: params.checkinLogId,
+        checkinTimeline: timeline.map((log) => ({
+          id: log.id,
+          loggedAt: log.loggedAt.toISOString(),
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: log.source,
+        })),
+        demo: true,
+      },
+    },
+    create: {
+      id: `demo_daily_adjustment_${getDateKey(params.dayStart)}`,
+      userId: params.userId,
+      planningCycleId: params.input.planningCycleId ?? null,
+      dailyCheckinId: params.checkinId,
+      checkinLogId: params.checkinLogId,
+      scope: "daily",
+      ...dailyInsight,
+      sourceData: {
+        energyScore: params.input.energyScore,
+        stressScore: params.input.stressScore,
+        availableCapacityMinutes: params.input.availableCapacityMinutes ?? null,
+        userNote: params.input.userNote ?? null,
+        checkinLogId: params.checkinLogId,
+        checkinTimeline: timeline.map((log) => ({
+          id: log.id,
+          loggedAt: log.loggedAt.toISOString(),
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: log.source,
+        })),
+        demo: true,
+      },
+    },
+  });
+}
+
+export async function createCheckinLog(userId: string, input: CheckinLogInput) {
+  const cycleValidation = await validatePlanningCycle(userId, input.planningCycleId);
+  if (!cycleValidation.ok) return cycleValidation;
+
+  const dayStart = startOfLocalDay(input.loggedAt);
+  const checkinLog = await prisma.checkinLog.create({
+    data: {
+      userId,
+      planningCycleId: input.planningCycleId,
+      loggedAt: input.loggedAt,
+      energyScore: input.energyScore,
+      stressScore: input.stressScore,
+      availableCapacityMinutes: input.availableCapacityMinutes,
+      userNote: input.userNote,
+      source: input.source ?? "manual",
+    },
+  });
+
+  const checkin = await prisma.dailyCheckin.upsert({
+    where: {
+      userId_checkinDate: {
+        userId,
+        checkinDate: dayStart,
+      },
+    },
+    update: {
+      planningCycleId: input.planningCycleId,
+      energyScore: input.energyScore,
+      stressScore: input.stressScore,
+      availableCapacityMinutes: input.availableCapacityMinutes,
+      userNote: input.userNote,
+    },
+    create: {
+      userId,
+      planningCycleId: input.planningCycleId,
+      checkinDate: dayStart,
+      energyScore: input.energyScore,
+      stressScore: input.stressScore,
+      availableCapacityMinutes: input.availableCapacityMinutes,
+      userNote: input.userNote,
+    },
+    include: {
+      aiInsights: true,
+    },
+  });
+
+  let insight = null;
+
+  if (input.adjustToday) {
+    insight = await createInsightForCheckinLog({
+      userId,
+      input: { ...input, checkinDate: dayStart },
+      checkinId: checkin.id,
+      checkinLogId: checkinLog.id,
+      dayStart,
+    });
+  }
+
+  return { ok: true as const, value: { checkin, checkinLog, insight } };
+}
+
 export async function upsertDailyCheckin(userId: string, input: DailyCheckinInput) {
   if (input.planningCycleId) {
-    const cycle = await prisma.planningCycle.findFirst({
-      where: { id: input.planningCycleId, userId },
-      select: { id: true },
-    });
-
-    if (!cycle) {
-      return { ok: false as const, error: "planningCycleId was not found for this user.", status: 400 };
-    }
+    const cycleValidation = await validatePlanningCycle(userId, input.planningCycleId);
+    if (!cycleValidation.ok) return cycleValidation;
   }
+
+  const loggedAt = input.loggedAt ?? input.checkinDate;
+  const checkinLog = await prisma.checkinLog.create({
+    data: {
+      userId,
+      planningCycleId: input.planningCycleId,
+      loggedAt,
+      energyScore: input.energyScore,
+      stressScore: input.stressScore,
+      availableCapacityMinutes: input.availableCapacityMinutes,
+      userNote: input.userNote,
+      source: input.source ?? "manual",
+    },
+  });
 
   const checkin = await prisma.dailyCheckin.upsert({
     where: {
@@ -493,42 +769,29 @@ export async function upsertDailyCheckin(userId: string, input: DailyCheckinInpu
   let insight = null;
 
   if (input.adjustToday) {
-    const dailyInsight = buildDailyInsight(input);
-
-    insight = await prisma.aiInsight.upsert({
-      where: { id: `demo_daily_adjustment_${getDateKey(input.checkinDate)}` },
-      update: {
-        planningCycleId: input.planningCycleId,
-        dailyCheckinId: checkin.id,
-        scope: "daily",
-        ...dailyInsight,
-        sourceData: {
-          energyScore: input.energyScore,
-          stressScore: input.stressScore,
-          availableCapacityMinutes: input.availableCapacityMinutes,
-          userNote: input.userNote,
-          demo: true,
-        },
-      },
-      create: {
-        id: `demo_daily_adjustment_${getDateKey(input.checkinDate)}`,
-        userId,
-        planningCycleId: input.planningCycleId,
-        dailyCheckinId: checkin.id,
-        scope: "daily",
-        ...dailyInsight,
-        sourceData: {
-          energyScore: input.energyScore,
-          stressScore: input.stressScore,
-          availableCapacityMinutes: input.availableCapacityMinutes,
-          userNote: input.userNote,
-          demo: true,
-        },
-      },
+    insight = await createInsightForCheckinLog({
+      userId,
+      input,
+      checkinId: checkin.id,
+      checkinLogId: checkinLog.id,
+      dayStart: input.checkinDate,
     });
   }
 
-  return { ok: true as const, value: { checkin, insight } };
+  return { ok: true as const, value: { checkin, checkinLog, insight } };
+}
+
+export async function listCheckinLogs(userId: string, range: { start: Date; end: Date }) {
+  return prisma.checkinLog.findMany({
+    where: {
+      userId,
+      loggedAt: {
+        gte: range.start,
+        lt: range.end,
+      },
+    },
+    orderBy: { loggedAt: "asc" },
+  });
 }
 
 export async function listDailyCheckins(userId: string, range: { start: Date; end: Date }) {
@@ -550,7 +813,7 @@ export async function listDailyCheckins(userId: string, range: { start: Date; en
 export async function getTodayScheduleAdjustments(userId: string) {
   const today = getTodayRange();
 
-  const [checkin, blocks, replacementTasks] = await Promise.all([
+  const [checkin, latestCheckinLog, checkinTimeline, blocks, replacementTasks] = await Promise.all([
     prisma.dailyCheckin.findFirst({
       where: {
         userId,
@@ -560,6 +823,26 @@ export async function getTodayScheduleAdjustments(userId: string) {
         },
       },
       orderBy: { createdAt: "desc" },
+    }),
+    prisma.checkinLog.findFirst({
+      where: {
+        userId,
+        loggedAt: {
+          gte: today.start,
+          lt: today.end,
+        },
+      },
+      orderBy: { loggedAt: "desc" },
+    }),
+    prisma.checkinLog.findMany({
+      where: {
+        userId,
+        loggedAt: {
+          gte: today.start,
+          lt: today.end,
+        },
+      },
+      orderBy: { loggedAt: "asc" },
     }),
     prisma.scheduledBlock.findMany({
       where: {
@@ -623,6 +906,7 @@ export async function getTodayScheduleAdjustments(userId: string) {
     update: {
       planningCycleId: checkin?.planningCycleId ?? null,
       dailyCheckinId: checkin?.id ?? null,
+      checkinLogId: latestCheckinLog?.id ?? null,
       scope: "daily",
       insightType: "daily_schedule_adjustment",
       title: overloaded ? "Lighten today's plan" : "Today's plan looks manageable",
@@ -637,6 +921,24 @@ export async function getTodayScheduleAdjustments(userId: string) {
               availableCapacityMinutes: checkin.availableCapacityMinutes,
             }
           : null,
+        latestCheckinLog: latestCheckinLog
+          ? {
+              id: latestCheckinLog.id,
+              loggedAt: latestCheckinLog.loggedAt.toISOString(),
+              energyScore: latestCheckinLog.energyScore,
+              stressScore: latestCheckinLog.stressScore,
+              availableCapacityMinutes: latestCheckinLog.availableCapacityMinutes,
+            }
+          : null,
+        checkinTimeline: checkinTimeline.map((log) => ({
+          id: log.id,
+          loggedAt: log.loggedAt.toISOString(),
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: log.source,
+        })),
         actionCounts,
         suggestedAdjustments: suggestedAdjustments.map((adjustment) => ({
           ...adjustment,
@@ -656,6 +958,7 @@ export async function getTodayScheduleAdjustments(userId: string) {
       userId,
       planningCycleId: checkin?.planningCycleId ?? null,
       dailyCheckinId: checkin?.id ?? null,
+      checkinLogId: latestCheckinLog?.id ?? null,
       scope: "daily",
       insightType: "daily_schedule_adjustment",
       title: overloaded ? "Lighten today's plan" : "Today's plan looks manageable",
@@ -670,6 +973,24 @@ export async function getTodayScheduleAdjustments(userId: string) {
               availableCapacityMinutes: checkin.availableCapacityMinutes,
             }
           : null,
+        latestCheckinLog: latestCheckinLog
+          ? {
+              id: latestCheckinLog.id,
+              loggedAt: latestCheckinLog.loggedAt.toISOString(),
+              energyScore: latestCheckinLog.energyScore,
+              stressScore: latestCheckinLog.stressScore,
+              availableCapacityMinutes: latestCheckinLog.availableCapacityMinutes,
+            }
+          : null,
+        checkinTimeline: checkinTimeline.map((log) => ({
+          id: log.id,
+          loggedAt: log.loggedAt.toISOString(),
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: log.source,
+        })),
         actionCounts,
         suggestedAdjustments: suggestedAdjustments.map((adjustment) => ({
           ...adjustment,
@@ -689,6 +1010,8 @@ export async function getTodayScheduleAdjustments(userId: string) {
   return {
     date: today.start.toISOString().slice(0, 10),
     checkin,
+    latestCheckinLog,
+    checkinTimeline,
     actionCounts,
     suggestedAdjustments,
     insight,

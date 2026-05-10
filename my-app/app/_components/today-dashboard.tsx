@@ -48,6 +48,13 @@ function insightClass(severity: string) {
   return "border-blue-200 bg-blue-50";
 }
 
+function formatLoggedAt(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
   const params = await searchParams;
   const date = params?.date ?? defaultDemoDate;
@@ -143,6 +150,24 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
               <p className="mt-3 text-sm text-zinc-500">No check-in has been submitted for this date.</p>
             )}
             <DailyCheckinForm date={dashboard.date} initialCheckin={checkinFormState} />
+            {dashboard.todayCheckinLogs.length > 0 && (
+              <div className="mt-4 border-t border-zinc-100 pt-4">
+                <h3 className="text-sm font-semibold text-zinc-950">Today&apos;s stress/energy log</h3>
+                <div className="mt-2 grid gap-2">
+                  {dashboard.todayCheckinLogs.map((log) => (
+                    <div key={log.id} className="rounded-md bg-zinc-50 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-zinc-700">{formatLoggedAt(log.loggedAt)}</span>
+                        <span className="text-xs text-zinc-500">
+                          Energy {log.energyScore}/7 · Stress {log.stressScore}/7
+                        </span>
+                      </div>
+                      {log.userNote && <p className="mt-1 text-xs text-zinc-500">{log.userNote}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </article>
 
           <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">

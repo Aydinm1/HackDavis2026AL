@@ -315,20 +315,68 @@ async function main() {
     },
     update: {
       planningCycleId,
-      energyScore: 4,
+      energyScore: 3,
       stressScore: 6,
-      availableCapacityMinutes: 210,
-      userNote: "Slept okay, but the midterm and project both feel heavy today.",
+      availableCapacityMinutes: 150,
+      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
     },
     create: {
       id: "demo_checkin_2026_05_11",
       userId: DEMO_USER_ID,
       planningCycleId,
       checkinDate: new Date("2026-05-11T00:00:00-07:00"),
-      energyScore: 4,
+      energyScore: 3,
       stressScore: 6,
+      availableCapacityMinutes: 150,
+      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
+    },
+  });
+
+  await prisma.checkinLog.upsert({
+    where: { id: "demo_checkin_log_2026_05_11_morning" },
+    update: {
+      planningCycleId,
+      loggedAt: new Date("2026-05-11T08:15:00-07:00"),
+      energyScore: 5,
+      stressScore: 4,
       availableCapacityMinutes: 210,
-      userNote: "Slept okay, but the midterm and project both feel heavy today.",
+      userNote: "Morning feels manageable before the lecture stack.",
+      source: "manual",
+    },
+    create: {
+      id: "demo_checkin_log_2026_05_11_morning",
+      userId: DEMO_USER_ID,
+      planningCycleId,
+      loggedAt: new Date("2026-05-11T08:15:00-07:00"),
+      energyScore: 5,
+      stressScore: 4,
+      availableCapacityMinutes: 210,
+      userNote: "Morning feels manageable before the lecture stack.",
+      source: "manual",
+    },
+  });
+
+  await prisma.checkinLog.upsert({
+    where: { id: "demo_checkin_log_2026_05_11_afternoon" },
+    update: {
+      planningCycleId,
+      loggedAt: new Date("2026-05-11T15:20:00-07:00"),
+      energyScore: 3,
+      stressScore: 6,
+      availableCapacityMinutes: 150,
+      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
+      source: "manual",
+    },
+    create: {
+      id: "demo_checkin_log_2026_05_11_afternoon",
+      userId: DEMO_USER_ID,
+      planningCycleId,
+      loggedAt: new Date("2026-05-11T15:20:00-07:00"),
+      energyScore: 3,
+      stressScore: 6,
+      availableCapacityMinutes: 150,
+      userNote: "Afternoon energy dipped after lectures, and the midterm still feels heavy.",
+      source: "manual",
     },
   });
 
@@ -337,26 +385,46 @@ async function main() {
     update: {
       planningCycleId,
       dailyCheckinId: "demo_checkin_2026_05_11",
+      checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
       scope: "daily",
       insightType: "recovery_window",
       title: "Protect a recovery window tonight",
       body: "You have two high-load deadlines this week. Keep 8:30-9:30 PM unscheduled after chemistry review so you can reset before tomorrow's CS block.",
       severity: "caution",
       confidenceScore: 0.84,
-      sourceData: { energyScore: 4, stressScore: 6, demo: true },
+      sourceData: {
+        energyScore: 3,
+        stressScore: 6,
+        checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
+        checkinTimeline: [
+          { id: "demo_checkin_log_2026_05_11_morning", energyScore: 5, stressScore: 4 },
+          { id: "demo_checkin_log_2026_05_11_afternoon", energyScore: 3, stressScore: 6 },
+        ],
+        demo: true,
+      },
     },
     create: {
       id: "demo_insight_recovery_window",
       userId: DEMO_USER_ID,
       planningCycleId,
       dailyCheckinId: "demo_checkin_2026_05_11",
+      checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
       scope: "daily",
       insightType: "recovery_window",
       title: "Protect a recovery window tonight",
       body: "You have two high-load deadlines this week. Keep 8:30-9:30 PM unscheduled after chemistry review so you can reset before tomorrow's CS block.",
       severity: "caution",
       confidenceScore: 0.84,
-      sourceData: { energyScore: 4, stressScore: 6, demo: true },
+      sourceData: {
+        energyScore: 3,
+        stressScore: 6,
+        checkinLogId: "demo_checkin_log_2026_05_11_afternoon",
+        checkinTimeline: [
+          { id: "demo_checkin_log_2026_05_11_morning", energyScore: 5, stressScore: 4 },
+          { id: "demo_checkin_log_2026_05_11_afternoon", energyScore: 3, stressScore: 6 },
+        ],
+        demo: true,
+      },
     },
   });
 

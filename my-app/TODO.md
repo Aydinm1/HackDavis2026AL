@@ -31,6 +31,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Daily check-in APIs:
   - [x] `POST /api/checkins/daily`
   - [x] `GET /api/checkins?start=&end=`
+  - [x] `POST /api/checkins/logs`
+  - [x] `GET /api/checkins/logs?start=&end=`
   - [x] `POST /api/schedule/adjust-today`
 - [x] Today dashboard API:
   - [x] `GET /api/dashboard/today?date=YYYY-MM-DD`
@@ -68,6 +70,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Schedule read/update APIs exist, and MVP schedule generation is implemented.
 - [x] Daily adjustment returns concrete keep, shorten, move, skip, and replacement suggestions based on check-ins.
 - [x] Daily check-in can be submitted from the Today dashboard and chat.
+- [x] Repeated same-day stress/energy logs are stored in `CheckinLog` while `DailyCheckin` mirrors the latest daily state.
 - [x] Daily check-in natural-language mapping works for both exact scores and common stress/energy phrases.
 - [x] API docs exist and include current task, calendar, schedule, dashboard, chat, upload, and insight contracts.
 

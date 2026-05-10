@@ -23,6 +23,7 @@ model User {
   calendarEvents  CalendarEvent[]
   scheduledBlocks ScheduledBlock[]
   dailyCheckins   DailyCheckin[]
+  checkinLogs     CheckinLog[]
   aiInsights      AiInsight[]
   chatThreads     ChatThread[]
   chatMessages    ChatMessage[]
@@ -71,6 +72,7 @@ model PlanningCycle {
   tasks           Task[]
   scheduledBlocks ScheduledBlock[]
   dailyCheckins   DailyCheckin[]
+  checkinLogs     CheckinLog[]
   aiInsights      AiInsight[]
   chatThreads     ChatThread[]
 
@@ -259,12 +261,39 @@ model DailyCheckin {
   @@index([planningCycleId])
 }
 
+model CheckinLog {
+  id     String @id @default(cuid())
+  userId String
+
+  planningCycleId String?
+
+  loggedAt DateTime @default(now())
+
+  energyScore Int // 1-7
+  stressScore Int // 1-7
+
+  availableCapacityMinutes Int?
+  userNote                 String?
+  source                   String @default("manual") // manual | chat | voice | image | system
+
+  createdAt DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
+
+  aiInsights AiInsight[]
+
+  @@index([userId, loggedAt])
+  @@index([planningCycleId])
+}
+
 model AiInsight {
   id     String @id @default(cuid())
   userId String
 
   planningCycleId String?
   dailyCheckinId  String?
+  checkinLogId    String?
 
   scope       String @default("daily") // daily | weekly | longitudinal
   insightType String // low_energy_plan | recovery_window | workload_warning | completion_pattern | etc.
@@ -282,9 +311,11 @@ model AiInsight {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   planningCycle PlanningCycle? @relation(fields: [planningCycleId], references: [id])
   dailyCheckin  DailyCheckin?  @relation(fields: [dailyCheckinId], references: [id])
+  checkinLog    CheckinLog?    @relation(fields: [checkinLogId], references: [id])
 
   @@index([userId, scope])
   @@index([planningCycleId])
+  @@index([checkinLogId])
 }
 
 model ChatThread {

@@ -319,7 +319,7 @@ export async function generateInsight(userId: string, input: GenerateInsightInpu
   }
 
   const range = resolvedRange.value;
-  const [tasks, calendarEvents, scheduledBlocks, latestCheckin] = await Promise.all([
+  const [tasks, calendarEvents, scheduledBlocks, latestCheckinLog, checkinTimeline] = await Promise.all([
     prisma.task.findMany({
       where: {
         userId,
@@ -353,12 +353,19 @@ export async function generateInsight(userId: string, input: GenerateInsightInpu
       include: { task: true, taskBreakdown: true },
       orderBy: { startTime: "asc" },
     }),
-    prisma.dailyCheckin.findFirst({
+    prisma.checkinLog.findFirst({
       where: {
         userId,
-        checkinDate: { lte: range.end },
+        loggedAt: { lte: range.end },
       },
-      orderBy: { checkinDate: "desc" },
+      orderBy: { loggedAt: "desc" },
+    }),
+    prisma.checkinLog.findMany({
+      where: {
+        userId,
+        loggedAt: { gte: range.start, lt: range.end },
+      },
+      orderBy: { loggedAt: "asc" },
     }),
   ]);
 
@@ -378,7 +385,7 @@ export async function generateInsight(userId: string, input: GenerateInsightInpu
     .sort((a, b) => b.score - a.score);
   const topTask = scoredTasks[0]?.task;
   const recommendations: InsightRecommendation[] = [];
-  const lowCapacity = Boolean(latestCheckin && (latestCheckin.energyScore <= 2 || latestCheckin.stressScore >= 6));
+  const lowCapacity = Boolean(latestCheckinLog && (latestCheckinLog.energyScore <= 2 || latestCheckinLog.stressScore >= 6));
 
   if (topTask) {
     recommendations.push({
@@ -480,7 +487,7 @@ export async function generateInsight(userId: string, input: GenerateInsightInpu
     data: {
       userId,
       planningCycleId: range.planningCycleId,
-      dailyCheckinId: input.scope === "daily" ? latestCheckin?.id : undefined,
+      checkinLogId: input.scope === "daily" ? latestCheckinLog?.id : undefined,
       scope: storedScope,
       insightType: input.scope === "daily"
         ? lowCapacity
@@ -494,14 +501,24 @@ export async function generateInsight(userId: string, input: GenerateInsightInpu
       sourceData: {
         trigger: input.trigger ?? "manual",
         range: { start: range.start.toISOString(), end: range.end.toISOString() },
-        latestCheckin: latestCheckin
+        latestCheckin: latestCheckinLog
           ? {
-              id: latestCheckin.id,
-              energyScore: latestCheckin.energyScore,
-              stressScore: latestCheckin.stressScore,
-              availableCapacityMinutes: latestCheckin.availableCapacityMinutes,
+              id: latestCheckinLog.id,
+              loggedAt: latestCheckinLog.loggedAt.toISOString(),
+              energyScore: latestCheckinLog.energyScore,
+              stressScore: latestCheckinLog.stressScore,
+              availableCapacityMinutes: latestCheckinLog.availableCapacityMinutes,
             }
           : null,
+        checkinTimeline: checkinTimeline.map((log) => ({
+          id: log.id,
+          loggedAt: log.loggedAt.toISOString(),
+          energyScore: log.energyScore,
+          stressScore: log.stressScore,
+          availableCapacityMinutes: log.availableCapacityMinutes,
+          userNote: log.userNote,
+          source: log.source,
+        })),
         totalScheduledMinutes,
         hardScheduledMinutes,
         overloadedDays,

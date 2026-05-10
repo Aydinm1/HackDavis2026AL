@@ -1050,11 +1050,11 @@ npm run seed
 
 ## Daily Check-Ins
 
-Daily check-ins capture student capacity for a single date. They intentionally do not include mood or sleep fields.
+Daily check-ins capture student capacity for a single date. They intentionally do not include mood or sleep fields. `DailyCheckin` remains the latest daily summary, while `CheckinLog` stores multiple stress/energy entries per day for timeline and AI context.
 
 ### POST `/api/checkins/daily`
 
-Creates or updates one check-in per user per date.
+Creates a check-in log and creates or updates one daily summary per user per date.
 
 Accepted body:
 
@@ -1062,29 +1062,33 @@ Accepted body:
 {
   "planningCycleId": "demo_cycle_2026_05_11",
   "checkinDate": "2026-05-11",
+  "loggedAt": "2026-05-11T15:30:00-07:00",
   "energyScore": 2,
   "stressScore": 6,
   "availableCapacityMinutes": 120,
   "userNote": "Feeling overloaded.",
-  "adjustToday": true
+  "adjustToday": true,
+  "source": "manual"
 }
 ```
 
 Validation:
 
 - `checkinDate` is required and must start with `YYYY-MM-DD`.
+- `loggedAt` is optional and must be a valid ISO date string.
 - `energyScore` is required and must be an integer from `1` to `7`.
 - `stressScore` is required and must be an integer from `1` to `7`.
 - `availableCapacityMinutes` is optional and must be `0` or greater.
 - `userNote` is optional.
 - `adjustToday` is optional.
+- `source` is optional and must be `manual`, `chat`, `voice`, `image`, or `system`.
 - Unknown fields are rejected, including `mood` and `sleep` fields.
 - If `planningCycleId` is provided, it must belong to the current user.
 
 Behavior:
 
-- Saves one check-in per user per date.
-- If a check-in already exists for that date, updates it.
+- Creates a `CheckinLog` entry for history.
+- If a `DailyCheckin` already exists for that date, updates it with the latest stress/energy values.
 - If `adjustToday` is `true`, creates or updates a daily `AiInsight`.
 - If `energyScore <= 2` or `stressScore >= 6`, the insight recommends a lighter plan.
 
@@ -1101,6 +1105,13 @@ Response:
       "availableCapacityMinutes": 120,
       "userNote": "Feeling overloaded."
     },
+    "checkinLog": {
+      "id": "checkin-log-id",
+      "loggedAt": "2026-05-11T22:30:00.000Z",
+      "energyScore": 2,
+      "stressScore": 6,
+      "source": "manual"
+    },
     "insight": {
       "id": "demo_daily_adjustment_2026_05_11",
       "insightType": "low_energy_plan",
@@ -1110,6 +1121,29 @@ Response:
   }
 }
 ```
+
+### POST `/api/checkins/logs`
+
+Creates a stress/energy log entry and updates that date's daily summary.
+
+Accepted body:
+
+```json
+{
+  "planningCycleId": "demo_cycle_2026_05_11",
+  "loggedAt": "2026-05-11T15:30:00-07:00",
+  "energyScore": 3,
+  "stressScore": 6,
+  "availableCapacityMinutes": 90,
+  "userNote": "Afternoon dip after lectures.",
+  "adjustToday": true,
+  "source": "manual"
+}
+```
+
+### GET `/api/checkins/logs?start=&end=`
+
+Returns user-scoped stress/energy log entries between `start` and `end`, ordered by `loggedAt`.
 
 ### GET `/api/checkins?start=&end=`
 
@@ -1143,7 +1177,7 @@ Returns concrete MVP adjustment suggestions for today.
 
 Behavior:
 
-- Uses the latest daily check-in for today when present.
+- Uses the latest daily check-in summary for today when present and includes same-day check-in logs in insight source data.
 - Low energy (`energyScore <= 2`) or high stress (`stressScore >= 6`) triggers lighter-plan suggestions.
 - Looks at today's user-scoped scheduled blocks.
 - Preserves fixed calendar events because this endpoint only suggests changes to scheduled task blocks.

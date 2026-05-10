@@ -961,12 +961,14 @@ async function executeDailyCheckin(userId: string, action: MockParsedAction) {
   const result = await upsertDailyCheckin(userId, {
     planningCycleId: typeof payload.planningCycleId === "string" ? payload.planningCycleId : null,
     checkinDate,
+    loggedAt: new Date(),
     energyScore,
     stressScore,
     availableCapacityMinutes:
       typeof payload.availableCapacityMinutes === "number" ? Math.max(0, Math.round(payload.availableCapacityMinutes)) : null,
     userNote: typeof payload.userNote === "string" ? payload.userNote : null,
     adjustToday: typeof payload.adjustToday === "boolean" ? payload.adjustToday : true,
+    source: "chat",
   });
 
   if (!result.ok) {

@@ -48,7 +48,7 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
   const now = new Date();
   const eventAnchor = now > range.start && now < range.end ? now : range.start;
 
-  const [checkin, nextCalendarEvent, todayBlocks, topTasks, insights] = await Promise.all([
+  const [checkin, latestCheckinLog, todayCheckinLogs, nextCalendarEvent, todayBlocks, topTasks, insights] = await Promise.all([
     prisma.dailyCheckin.findUnique({
       where: {
         userId_checkinDate: {
@@ -59,6 +59,26 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
       include: {
         aiInsights: true,
       },
+    }),
+    prisma.checkinLog.findFirst({
+      where: {
+        userId,
+        loggedAt: {
+          gte: range.start,
+          lt: range.end,
+        },
+      },
+      orderBy: { loggedAt: "desc" },
+    }),
+    prisma.checkinLog.findMany({
+      where: {
+        userId,
+        loggedAt: {
+          gte: range.start,
+          lt: range.end,
+        },
+      },
+      orderBy: { loggedAt: "asc" },
     }),
     prisma.calendarEvent.findFirst({
       where: {
@@ -106,6 +126,8 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
   return {
     date: range.date,
     checkin,
+    latestCheckinLog,
+    todayCheckinLogs,
     nextCalendarEvent,
     todayBlocks,
     topTasks,

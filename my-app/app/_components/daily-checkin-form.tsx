@@ -11,6 +11,13 @@ export type DailyCheckinFormState = {
   userNote: string | null;
 };
 
+function defaultLoggedAt(date: string) {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  return `${date}T${hours}:${minutes}:00`;
+}
+
 export function DailyCheckinForm({
   date,
   initialCheckin,
@@ -39,17 +46,18 @@ export function DailyCheckinForm({
 
     setIsSaving(true);
     try {
-      const response = await fetch("/api/checkins/daily", {
+      const response = await fetch("/api/checkins/logs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planningCycleId: initialCheckin?.planningCycleId ?? undefined,
-          checkinDate: date,
+          loggedAt: defaultLoggedAt(date),
           energyScore: Number(energyScore),
           stressScore: Number(stressScore),
           availableCapacityMinutes: capacity,
           userNote: userNote.trim() || null,
           adjustToday: true,
+          source: "manual",
         }),
       });
       const body = await response.json();
@@ -131,7 +139,7 @@ export function DailyCheckinForm({
         disabled={isSaving}
         className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
       >
-        {isSaving ? "Saving..." : "Save check-in"}
+        {isSaving ? "Saving..." : "Log stress/energy"}
       </button>
     </div>
   );
