@@ -6,6 +6,9 @@ const taskInclude = {
     orderBy: { sequenceOrder: "asc" as const },
   },
   scheduledBlocks: {
+    include: {
+      taskBreakdown: true,
+    },
     orderBy: { startTime: "asc" as const },
   },
 };
@@ -499,6 +502,53 @@ export function buildBreakdownSteps(task: {
   });
 }
 
+async function alignScheduledBlocksToBreakdowns(userId: string, taskId: string, breakdowns: Array<{ id: string; title: string }>) {
+  const scheduledBlocks = await prisma.scheduledBlock.findMany({
+    where: {
+      userId,
+      taskId,
+      status: { not: "cancelled" },
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+    orderBy: [{ startTime: "asc" }, { createdAt: "asc" }],
+  });
+
+  await Promise.all(
+    scheduledBlocks.slice(0, breakdowns.length).map((block, index) => {
+      const breakdown = breakdowns[index];
+
+      return prisma.scheduledBlock.update({
+        where: { id: block.id },
+        data: {
+          taskBreakdownId: breakdown.id,
+          title: breakdown.title,
+        },
+      });
+    }),
+  );
+
+  const activeBreakdownIds = scheduledBlocks
+    .slice(0, breakdowns.length)
+    .filter((block) => ["proposed", "accepted", "rescheduled"].includes(block.status))
+    .map((_, index) => breakdowns[index]?.id)
+    .filter(Boolean) as string[];
+
+  if (activeBreakdownIds.length > 0) {
+    await prisma.taskBreakdown.updateMany({
+      where: {
+        userId,
+        taskId,
+        id: { in: activeBreakdownIds },
+        status: "todo",
+      },
+      data: { status: "scheduled" },
+    });
+  }
+}
+
 export async function generateTaskBreakdown(userId: string, taskId: string, input: TaskBreakdownInput = {}) {
   const task = await prisma.task.findFirst({
     where: { id: taskId, userId },
@@ -583,7 +633,14 @@ export async function generateTaskBreakdown(userId: string, taskId: string, inpu
     ),
   );
 
-  const breakdowns = await prisma.taskBreakdown.findMany({
+  let breakdowns = await prisma.taskBreakdown.findMany({
+    where: { userId, taskId },
+    orderBy: { sequenceOrder: "asc" },
+  });
+
+  await alignScheduledBlocksToBreakdowns(userId, taskId, breakdowns);
+
+  breakdowns = await prisma.taskBreakdown.findMany({
     where: { userId, taskId },
     orderBy: { sequenceOrder: "asc" },
   });

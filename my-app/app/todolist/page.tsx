@@ -32,9 +32,11 @@ export default async function ToDoList() {
       })),
       scheduledBlocks: task.scheduledBlocks.map((block) => ({
         id: block.id,
+        title: block.title,
         startTime: block.startTime.toISOString(),
         endTime: block.endTime.toISOString(),
         status: block.status,
+        taskBreakdownTitle: block.taskBreakdown?.title ?? null,
       })),
     }),
   );

@@ -28,10 +28,22 @@ export type TaskViewModel = {
   }[];
   scheduledBlocks: {
     id: string;
+    title: string;
     startTime: string;
     endTime: string;
     status: string;
+    taskBreakdownTitle: string | null;
   }[];
+};
+
+type TaskBreakdownResponse = {
+  data?: {
+    breakdowns: TaskViewModel["taskBreakdowns"];
+    replacedExisting: boolean;
+    targetBlockMinutes: number;
+    message: string;
+  };
+  error?: string;
 };
 
 type TaskFormState = {
@@ -313,6 +325,8 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [form, setForm] = useState(defaultFormState);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [breakdownBusyTaskId, setBreakdownBusyTaskId] = useState<string | null>(null);
+  const [breakdownMessageByTaskId, setBreakdownMessageByTaskId] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const activeTasks = useMemo(() => tasks.filter((task) => task.status !== "cancelled"), [tasks]);
@@ -454,6 +468,52 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
     }
   }
 
+  async function generateBreakdown(taskId: string, replaceExisting: boolean) {
+    setError(null);
+    setBreakdownBusyTaskId(taskId);
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/breakdown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replaceExisting }),
+      });
+      const body = (await response.json()) as TaskBreakdownResponse;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error ?? "Failed to break down task.");
+      }
+
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                taskBreakdowns: body.data?.breakdowns ?? task.taskBreakdowns,
+                scheduledBlocks: task.scheduledBlocks.map((block, index) => {
+                  const breakdown = body.data?.breakdowns[index];
+                  return breakdown
+                    ? {
+                        ...block,
+                        title: breakdown.title,
+                        taskBreakdownTitle: breakdown.title,
+                      }
+                    : block;
+                }),
+              }
+            : task,
+        ),
+      );
+      setBreakdownMessageByTaskId((current) => ({
+        ...current,
+        [taskId]: body.data?.message ?? "Breakdown updated.",
+      }));
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to break down task.");
+    } finally {
+      setBreakdownBusyTaskId(null);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <header className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm sm:flex-row sm:items-end sm:justify-between">
@@ -566,7 +626,10 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
                           key={block.id}
                           className="flex flex-col gap-1 rounded-md bg-blue-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
                         >
-                          <span className="font-medium text-zinc-800">{formatBlockWindow(block.startTime, block.endTime)}</span>
+                          <div>
+                            <div className="font-medium text-zinc-800">{block.taskBreakdownTitle ?? block.title}</div>
+                            <div className="text-xs text-zinc-500">{formatBlockWindow(block.startTime, block.endTime)}</div>
+                          </div>
                           <span className="text-xs font-medium text-blue-700">{block.status}</span>
                         </div>
                       ))}
@@ -591,6 +654,25 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
                   >
                     Edit
                   </button>
+                  {task.taskBreakdowns.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => generateBreakdown(task.id, false)}
+                      disabled={busyTaskId === task.id || breakdownBusyTaskId === task.id || task.status === "cancelled"}
+                      className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-50 disabled:text-zinc-400"
+                    >
+                      {breakdownBusyTaskId === task.id ? "Breaking down..." : "Break down"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => generateBreakdown(task.id, true)}
+                      disabled={busyTaskId === task.id || breakdownBusyTaskId === task.id || task.status === "cancelled"}
+                      className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:text-zinc-400"
+                    >
+                      {breakdownBusyTaskId === task.id ? "Regenerating..." : "Regenerate"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => deleteTask(task.id)}
@@ -600,6 +682,10 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
                     {busyTaskId === task.id ? "Deleting..." : "Delete"}
                   </button>
                 </div>
+
+                {breakdownMessageByTaskId[task.id] && (
+                  <p className="mt-2 text-xs font-medium text-violet-700">{breakdownMessageByTaskId[task.id]}</p>
+                )}
 
                 {task.taskBreakdowns.length > 0 && (
                   <div className="mt-4 border-t border-zinc-100 pt-3">

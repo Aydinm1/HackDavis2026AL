@@ -40,6 +40,13 @@ type SchedulableTask = {
   workType: string;
 };
 
+type SchedulableUnit = SchedulableTask & {
+  taskBreakdownId: string | null;
+  durationMinutes: number;
+  sequenceOrder: number;
+  parentTaskTitle: string;
+};
+
 type SchedulingPreferences = {
   workStartTime: string;
   workEndTime: string;
@@ -53,6 +60,7 @@ type ScheduleProposal = {
   userId: string;
   planningCycleId: string | null;
   taskId: string;
+  taskBreakdownId?: string | null;
   title: string;
   startTime: Date;
   endTime: Date;
@@ -495,6 +503,86 @@ function scheduleScore(task: SchedulableTask, rangeStart: Date, latestCheckin?: 
   };
 }
 
+function buildSchedulableUnits(
+  tasks: Array<SchedulableTask & {
+    scheduledBlocks: Array<{ startTime: Date; endTime: Date; taskBreakdownId: string | null }>;
+    taskBreakdowns: Array<{
+      id: string;
+      title: string;
+      sequenceOrder: number;
+      estimatedMinutes: number | null;
+      cognitiveLoad: number;
+      scheduledBlocks: Array<{ id: string }>;
+    }>;
+  }>,
+  preferredBlockLengthMinutes: number,
+  rangeStart: Date,
+) {
+  const units: SchedulableUnit[] = [];
+
+  for (const task of tasks) {
+    if (task.taskBreakdowns.length > 0) {
+      for (const breakdown of task.taskBreakdowns) {
+        if (breakdown.scheduledBlocks.length > 0) {
+          continue;
+        }
+
+        units.push({
+          id: task.id,
+          planningCycleId: task.planningCycleId,
+          title: breakdown.title,
+          dueAt: task.dueAt,
+          priority: task.priority,
+          cognitiveLoad: breakdown.cognitiveLoad,
+          estimatedMinutes: breakdown.estimatedMinutes,
+          workType: task.workType,
+          taskBreakdownId: breakdown.id,
+          durationMinutes: breakdown.estimatedMinutes ?? preferredBlockLengthMinutes,
+          sequenceOrder: breakdown.sequenceOrder,
+          parentTaskTitle: task.title,
+        });
+      }
+
+      continue;
+    }
+
+    const alreadyScheduledMinutes = task.scheduledBlocks.reduce(
+      (total, block) => total + minutesBetween(block.startTime, block.endTime),
+      0,
+    );
+    const remainingMinutes = Math.max((task.estimatedMinutes ?? preferredBlockLengthMinutes) - alreadyScheduledMinutes, 0);
+    let chunkIndex = 0;
+    let minutesLeft = remainingMinutes;
+
+    while (minutesLeft > 0) {
+      const durationMinutes = Math.max(15, Math.min(preferredBlockLengthMinutes, minutesLeft));
+      units.push({
+        id: task.id,
+        planningCycleId: task.planningCycleId,
+        title: task.title,
+        dueAt: task.dueAt,
+        priority: task.priority,
+        cognitiveLoad: task.cognitiveLoad,
+        estimatedMinutes: task.estimatedMinutes,
+        workType: task.workType,
+        taskBreakdownId: null,
+        durationMinutes,
+        sequenceOrder: chunkIndex + 1,
+        parentTaskTitle: task.title,
+      });
+      minutesLeft -= durationMinutes;
+      chunkIndex += 1;
+    }
+  }
+
+  return units.sort((a, b) => {
+    const scoreDelta = taskSortScore(b, rangeStart) - taskSortScore(a, rangeStart);
+    if (scoreDelta !== 0) return scoreDelta;
+    if (a.id !== b.id) return a.id.localeCompare(b.id);
+    return a.sequenceOrder - b.sequenceOrder;
+  });
+}
+
 export async function generateSchedule(userId: string, input: GenerateScheduleInput) {
   const resolvedRange = await resolveScheduleRange(userId, input);
   if (!resolvedRange.ok) {
@@ -522,7 +610,22 @@ export async function generateSchedule(userId: string, input: GenerateScheduleIn
         workType: true,
         scheduledBlocks: {
           where: { status: { in: [...activeBlockStatuses] } },
-          select: { startTime: true, endTime: true },
+          select: { startTime: true, endTime: true, taskBreakdownId: true },
+        },
+        taskBreakdowns: {
+          where: { status: { in: ["todo", "scheduled"] } },
+          select: {
+            id: true,
+            title: true,
+            sequenceOrder: true,
+            estimatedMinutes: true,
+            cognitiveLoad: true,
+            scheduledBlocks: {
+              where: { status: { in: [...activeBlockStatuses] } },
+              select: { id: true },
+            },
+          },
+          orderBy: { sequenceOrder: "asc" },
         },
       },
     }),
@@ -564,20 +667,7 @@ export async function generateSchedule(userId: string, input: GenerateScheduleIn
     maxHardWorkMinutesPerDay: preferences?.maxHardWorkMinutesPerDay ?? 180,
   };
 
-  const sortedTasks = tasks
-    .map((task) => {
-      const alreadyScheduledMinutes = task.scheduledBlocks.reduce(
-        (total, block) => total + minutesBetween(block.startTime, block.endTime),
-        0,
-      );
-
-      return {
-        task,
-        remainingMinutes: Math.max((task.estimatedMinutes ?? effectivePreferences.preferredBlockLengthMinutes) - alreadyScheduledMinutes, 0),
-      };
-    })
-    .filter(({ remainingMinutes }) => remainingMinutes > 0)
-    .sort((a, b) => taskSortScore(b.task, start) - taskSortScore(a.task, start));
+  const schedulableUnits = buildSchedulableUnits(tasks, effectivePreferences.preferredBlockLengthMinutes, start);
 
   const busyWindows: BusyWindow[] = [
     ...calendarEvents,
@@ -588,69 +678,57 @@ export async function generateSchedule(userId: string, input: GenerateScheduleIn
   const unscheduledTasks: Array<{ taskId: string; title: string; reason: string; remainingMinutes: number }> = [];
   const lowCapacityDay = Boolean(latestCheckin && (latestCheckin.energyScore <= 2 || latestCheckin.stressScore >= 6));
 
-  for (const { task, remainingMinutes } of sortedTasks) {
-    let minutesLeft = remainingMinutes;
-    let createdForTask = 0;
+  for (const unit of schedulableUnits) {
+    const maxBlockLength = lowCapacityDay && unit.cognitiveLoad >= 5 && !unit.taskBreakdownId
+      ? Math.min(30, effectivePreferences.preferredBlockLengthMinutes)
+      : unit.durationMinutes;
+    const durationMinutes = Math.max(15, Math.min(maxBlockLength, unit.durationMinutes));
+    const taskRangeEnd = unit.dueAt && unit.dueAt > start && unit.dueAt < end ? unit.dueAt : end;
+    const slot = findFirstAvailableSlot({
+      range: { start, end: taskRangeEnd },
+      durationMinutes,
+      busyWindows,
+      preferences: effectivePreferences,
+      dayUsage,
+      cognitiveLoad: unit.cognitiveLoad,
+    });
 
-    while (minutesLeft > 0) {
-      const maxBlockLength = lowCapacityDay && task.cognitiveLoad >= 5
-        ? Math.min(30, effectivePreferences.preferredBlockLengthMinutes)
-        : effectivePreferences.preferredBlockLengthMinutes;
-      const durationMinutes = Math.max(15, Math.min(maxBlockLength, minutesLeft));
-      const taskRangeEnd = task.dueAt && task.dueAt > start && task.dueAt < end ? task.dueAt : end;
-      const slot = findFirstAvailableSlot({
-        range: { start, end: taskRangeEnd },
-        durationMinutes,
-        busyWindows,
-        preferences: effectivePreferences,
-        dayUsage,
-        cognitiveLoad: task.cognitiveLoad,
-      });
-
-      if (!slot) {
-        break;
-      }
-
-      const scores = scheduleScore(task, start, latestCheckin);
-      const proposal: ScheduleProposal = {
-        userId,
-        planningCycleId: task.planningCycleId ?? planningCycleId,
-        taskId: task.id,
-        title: task.title,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        status: "proposed",
-        createdBy: "agent",
-        source: "scheduler",
-        schedulingReason: buildSchedulingReason(task, start, latestCheckin),
-        ...scores,
-      };
-
-      proposals.push(proposal);
-      busyWindows.push(slot);
-
-      const dayKey = getDayKey(slot.startTime);
-      const usage = dayUsage.get(dayKey) ?? { totalMinutes: 0, hardMinutes: 0 };
-      usage.totalMinutes += durationMinutes;
-      if (task.cognitiveLoad >= 6) {
-        usage.hardMinutes += durationMinutes;
-      }
-      dayUsage.set(dayKey, usage);
-
-      minutesLeft -= durationMinutes;
-      createdForTask += durationMinutes;
-    }
-
-    if (createdForTask < remainingMinutes) {
+    if (!slot) {
       unscheduledTasks.push({
-        taskId: task.id,
-        title: task.title,
-        reason: createdForTask > 0
-          ? "Only part of this task fit before its deadline and within work-hour/capacity limits."
-          : "No open work-hour slot fit before the deadline without calendar or scheduled-block conflicts.",
-        remainingMinutes: remainingMinutes - createdForTask,
+        taskId: unit.id,
+        title: unit.taskBreakdownId ? `${unit.parentTaskTitle}: ${unit.title}` : unit.title,
+        reason: "No open work-hour slot fit before the deadline without calendar or scheduled-block conflicts.",
+        remainingMinutes: unit.durationMinutes,
       });
+      continue;
     }
+
+    const scores = scheduleScore(unit, start, latestCheckin);
+    const proposal: ScheduleProposal = {
+      userId,
+      planningCycleId: unit.planningCycleId ?? planningCycleId,
+      taskId: unit.id,
+      taskBreakdownId: unit.taskBreakdownId,
+      title: unit.title,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      status: "proposed",
+      createdBy: "agent",
+      source: "scheduler",
+      schedulingReason: buildSchedulingReason(unit, start, latestCheckin),
+      ...scores,
+    };
+
+    proposals.push(proposal);
+    busyWindows.push(slot);
+
+    const dayKey = getDayKey(slot.startTime);
+    const usage = dayUsage.get(dayKey) ?? { totalMinutes: 0, hardMinutes: 0 };
+    usage.totalMinutes += durationMinutes;
+    if (unit.cognitiveLoad >= 6) {
+      usage.hardMinutes += durationMinutes;
+    }
+    dayUsage.set(dayKey, usage);
   }
 
   if (input.dryRun) {
@@ -672,12 +750,23 @@ export async function generateSchedule(userId: string, input: GenerateScheduleIn
     : [];
 
   const touchedTaskIds = Array.from(new Set(createdBlocks.map((block) => block.taskId).filter(Boolean))) as string[];
+  const touchedBreakdownIds = Array.from(new Set(createdBlocks.map((block) => block.taskBreakdownId).filter(Boolean))) as string[];
   if (touchedTaskIds.length > 0) {
     await prisma.task.updateMany({
       where: {
         userId,
         id: { in: touchedTaskIds },
         status: { in: ["todo", "deferred"] },
+      },
+      data: { status: "scheduled" },
+    });
+  }
+  if (touchedBreakdownIds.length > 0) {
+    await prisma.taskBreakdown.updateMany({
+      where: {
+        userId,
+        id: { in: touchedBreakdownIds },
+        status: "todo",
       },
       data: { status: "scheduled" },
     });
