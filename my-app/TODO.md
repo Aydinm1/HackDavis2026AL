@@ -43,6 +43,10 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Uploaded input APIs:
   - [x] `POST /api/uploads/image`
   - [x] `POST /api/uploads/voice`
+- [x] Insight APIs:
+  - [x] `GET /api/insights/current`
+  - [x] `POST /api/insights/generate`
+- [x] Advisory planning insights for daily/weekly planning, recovery windows, and schedule-regeneration recommendations.
 - [x] Basic API documentation in `docs/API.md`.
 - [x] Validation tests in `tests/api-validation.test.ts`.
 - [x] Basic frontend placeholder pages.
@@ -51,31 +55,30 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 - [ ] Voice/image pipeline exists, but API and frontend need final alignment around `imageData`, `audioData`, `mimeType`, transcripts, and proposed action cards.
 - [ ] Gemini parser exists, but fallback and confidence behavior should be tightened for demo reliability.
-- [ ] Task difficulty exists as `cognitiveLoad`, but needs better UI labels, defaults, and parser inference.
+- [ ] Task difficulty exists as `cognitiveLoad`; backend/chat inference is started, but UI labels and manual controls are still missing.
 - [ ] Task breakdown exists, but is still deterministic/basic and not good enough for bigger tasks.
-- [ ] Schedule read/update APIs exist, but actual schedule generation is missing.
+- [x] Schedule read/update APIs exist, and MVP schedule generation is implemented.
 - [ ] Daily adjustment exists, but does not yet rewrite or propose concrete block changes.
-- [ ] API docs exist, but should be kept updated as contracts change.
+- [x] API docs exist and include current task, calendar, schedule, dashboard, chat, upload, and insight contracts.
 
 ### Missing
 
 - [ ] Real Google Calendar OAuth and sync.
 - [x] `POST /api/schedule/generate`.
-- [ ] `GET /api/insights/current`.
-- [ ] `POST /api/insights/generate`.
+- [x] `GET /api/insights/current`.
+- [x] `POST /api/insights/generate`.
 - [ ] `GET /api/me`.
 - [ ] `PATCH /api/me/preferences`.
 - [ ] Planning cycle APIs.
 - [ ] Frontend pages wired to real APIs.
-- [ ] AI action confirmation cards in the frontend.
-- [ ] Recovery window and weekly workload insights.
+- [x] AI action confirmation/edit cards in the frontend chat page.
 
 ## Priority 0: Demo-Critical Backend Completion
 
 ### Schedule Generation
 
 - [x] Implement `POST /api/schedule/generate`.
-- [ ] Input can be minimal for MVP:
+- [x] Input can be minimal for MVP:
   - [x] optional `planningCycleId`
   - [x] optional `start`
   - [x] optional `end`
@@ -104,7 +107,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Task Difficulty
 
-- [ ] Keep `cognitiveLoad` as the canonical difficulty field, range `1-7`.
+- [x] Keep `cognitiveLoad` as the canonical difficulty field, range `1-7`.
 - [ ] Add frontend labels:
   - [ ] `1-2`: light
   - [ ] `3-4`: moderate
@@ -119,9 +122,10 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [ ] `reading`: 4
   - [ ] `creative`: 5
   - [ ] `personal`: 3
-- [ ] Update mock/Gemini parsers to infer difficulty from language:
-  - [ ] "easy", "quick", "simple" -> lower load
-  - [ ] "hard", "deep work", "project", "midterm", "essay" -> higher load
+- [x] Update chat/mock parser path to infer difficulty from language:
+  - [x] "easy", "quick", "simple" -> lower load
+  - [x] "hard", "deep work", "project", "midterm", "essay" -> higher load
+- [ ] Tighten Gemini parser schema/prompt so model output consistently includes difficulty and estimated minutes.
 - [ ] Show cognitive load on task cards, dashboard top tasks, and schedule blocks.
 
 ### Bigger Task Breakdown
@@ -277,28 +281,29 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Tasks Page
 
-- [ ] Wire task list to `GET /api/tasks`.
+- [x] Wire task list to seeded task data.
 - [ ] Add task creation form.
 - [ ] Add edit/complete/cancel actions.
 - [ ] Add cognitive load control.
 - [ ] Add estimated minutes field.
 - [ ] Add task breakdown button.
-- [ ] Show breakdown rows under parent task.
+- [x] Show breakdown rows under parent task.
 
 ### Calendar / Planner Page
 
-- [ ] Wire to `GET /api/schedule`.
-- [ ] Show calendar events and scheduled blocks together.
+- [x] Wire to seeded schedule data.
+- [x] Show calendar events and scheduled blocks together.
 - [ ] Add generate schedule button.
 - [ ] Add complete/skip/move controls for blocks.
-- [ ] Show block status and scheduling reason.
+- [x] Show block status and scheduling reason.
 
 ### Chat Page
 
 - [ ] Load thread messages from API.
 - [ ] Send chat messages to `/api/chat/message`.
-- [ ] Show AiAction cards.
-- [ ] Add confirm/cancel buttons.
+- [x] Show AiAction cards.
+- [x] Add confirm/cancel buttons.
+- [x] Add edit payload before confirm.
 - [ ] Support image and voice upload flow.
 
 ### Upload Confirmation
@@ -311,27 +316,27 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ### Insight APIs
 
-- [ ] Implement `GET /api/insights/current`.
-- [ ] Implement `POST /api/insights/generate`.
-- [ ] Generate daily tactical insight from:
-  - [ ] check-in
-  - [ ] today blocks
-  - [ ] urgent tasks
-  - [ ] calendar events
-  - [ ] skipped/incomplete blocks
-- [ ] Generate weekly/recovery insight from:
-  - [ ] total scheduled work minutes
-  - [ ] high-load blocks
-  - [ ] upcoming deadlines
-  - [ ] stress/energy check-ins
-  - [ ] free weekend windows
+- [x] Implement `GET /api/insights/current`.
+- [x] Implement `POST /api/insights/generate`.
+- [x] Generate daily tactical insight from:
+  - [x] check-in
+  - [x] today blocks
+  - [x] urgent tasks
+  - [x] calendar events
+  - [x] skipped/incomplete blocks
+- [x] Generate weekly/recovery insight from:
+  - [x] total scheduled work minutes
+  - [x] high-load blocks
+  - [x] upcoming deadlines
+  - [x] stress/energy check-ins
+  - [x] free weekend windows
 
 ### Recovery Window
 
-- [ ] Calculate free windows from calendar events and scheduled blocks.
-- [ ] Prefer weekend or evening openings.
-- [ ] Create `AiInsight` with `insightType = "recovery_window"`.
-- [ ] Phrase as suggestion, not medical advice.
+- [x] Calculate free windows from calendar events and scheduled blocks.
+- [x] Prefer weekend or evening openings.
+- [x] Create `AiInsight` with `insightType = "recovery_window"`.
+- [x] Phrase as suggestion, not medical advice.
 
 ### Metrics
 
@@ -349,9 +354,9 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [ ] `GET /api/planning-cycles/current`
 - [ ] `POST /api/planning-cycles`
 - [ ] `PATCH /api/planning-cycles/[id]/intake`
-- [ ] `POST /api/schedule/generate`
-- [ ] `GET /api/insights/current`
-- [ ] `POST /api/insights/generate`
+- [x] `POST /api/schedule/generate`
+- [x] `GET /api/insights/current`
+- [x] `POST /api/insights/generate`
 - [ ] `GET /api/calendar/google/connect`
 - [ ] `GET /api/calendar/google/callback`
 - [ ] `POST /api/calendar/google/sync`
@@ -369,6 +374,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [ ] energy `2`
   - [ ] stress `6`
 - [ ] Show lighter-plan insight.
+- [ ] Generate weekly/planning insight from `/api/insights/generate`.
 - [ ] Upload event flyer image.
 - [ ] Confirm parsed event.
 - [ ] Show calendar updates and scheduler avoids that time.
@@ -381,7 +387,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
   - [ ] `npm run lint`
   - [ ] `npm run typecheck`
 - [ ] Add tests for:
-  - [ ] schedule generation conflict avoidance
+  - [x] schedule generation conflict avoidance
+  - [x] insight endpoint validation
   - [ ] task difficulty validation/defaults
   - [ ] task breakdown generation for large tasks
   - [ ] Google Calendar event upsert
@@ -410,11 +417,11 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ## Recommended Next Build Order
 
-1. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
-2. [ ] Finish voice/image Gemini flow and confirmation cards.
-3. [ ] Implement `POST /api/schedule/generate`.
-4. [ ] Improve task difficulty UI and parser inference.
-5. [ ] Improve task breakdowns for large tasks.
-6. [ ] Wire dashboard/tasks/calendar/chat pages to APIs.
+1. [ ] Wire dashboard page to APIs.
+2. [ ] Load existing chat thread history from APIs.
+3. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
+4. [ ] Finish voice/image Gemini flow and confirmation cards.
+5. [ ] Improve task difficulty UI and Gemini parser inference.
+6. [ ] Improve task breakdowns for large tasks.
 7. [ ] Add real Google Calendar OAuth/import.
-8. [ ] Add recovery insight generation.
+8. [ ] Add metrics queries for check-in, completion, and AI action success.

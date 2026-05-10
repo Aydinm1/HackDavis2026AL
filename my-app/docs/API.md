@@ -428,6 +428,81 @@ Rules:
 - `topTasks` are incomplete tasks sorted by due date urgency, then priority.
 - `insights` are the five most recent daily/weekly insights for the user.
 
+## Insights
+
+Insights are advisory. They can recommend schedule changes, breaks, recovery windows, and revised schedule generation, but they do not mutate scheduled blocks directly.
+
+### GET `/api/insights/current?scope=&limit=`
+
+Returns recent daily/weekly insights for the current user.
+
+Query params:
+
+- `scope`: optional, `daily` or `weekly`
+- `limit`: optional integer from `1` to `20`, default `5`
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "id": "insight-id",
+      "scope": "weekly",
+      "insightType": "weekly_planning",
+      "title": "This week needs a workload adjustment",
+      "body": "High-priority work still has unscheduled estimated time.",
+      "severity": "caution",
+      "sourceData": {
+        "recommendations": []
+      }
+    }
+  ]
+}
+```
+
+### POST `/api/insights/generate`
+
+Generates and stores an advisory planning insight.
+
+Accepted body:
+
+```json
+{
+  "scope": "planning_session",
+  "planningCycleId": "demo_cycle_2026_05_11",
+  "start": "2026-05-11T00:00:00-07:00",
+  "end": "2026-05-18T00:00:00-07:00",
+  "trigger": "weekly_planning"
+}
+```
+
+Validation:
+
+- `scope` must be `daily`, `weekly`, or `planning_session`.
+- `trigger` may be `manual`, `checkin`, `task_added`, or `weekly_planning`.
+- `start` and `end` must be provided together.
+- `date` may be used instead of `start`/`end` for day/week defaults.
+
+Behavior:
+
+- Reads tasks, task breakdowns, calendar events, scheduled blocks, and latest daily check-in.
+- Weighs priority, due dates, cognitive load, estimated minutes, existing schedule pressure, energy, and stress.
+- Stores the generated insight in `AiInsight`.
+- Returns structured recommendations in `sourceData.recommendations`.
+- Does not create, delete, or rewrite scheduled blocks.
+
+Recommendation types:
+
+- `work_now`
+- `schedule_task`
+- `move_block`
+- `shorten_block`
+- `skip_or_defer`
+- `protect_break`
+- `recovery_window`
+- `regenerate_schedule`
+
 ## Chat And AI Actions
 
 Chat is an input layer, not the source of truth. When a user creates a task or event through chat, the API writes real `Task` or `CalendarEvent` rows and stores an `AiAction` audit record.

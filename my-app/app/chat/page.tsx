@@ -21,6 +21,11 @@ type ChatEntry = {
   imageDataUrl?: string;
 };
 
+type ActionResult = {
+  data?: AiAction;
+  error?: string;
+};
+
 const ACTION_COLORS: Record<string, string> = {
   CREATE_TASK: "bg-violet-100 text-violet-800 border-violet-200",
   CREATE_EVENT: "bg-blue-100 text-blue-800 border-blue-200",
@@ -47,10 +52,66 @@ function PayloadRow({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-function ActionCard({ action }: { action: AiAction }) {
+function extractFollowUpAction(action: AiAction) {
+  const proposedScheduleAction = action.resultPayload?.proposedScheduleAction;
+  if (
+    typeof proposedScheduleAction === "object" &&
+    proposedScheduleAction !== null &&
+    !Array.isArray(proposedScheduleAction)
+  ) {
+    return proposedScheduleAction as AiAction;
+  }
+
+  return null;
+}
+
+function ActionCard({
+  action,
+  onConfirm,
+  onCancel,
+  isPending,
+}: {
+  action: AiAction;
+  onConfirm: (actionId: string, inputPayload?: Record<string, unknown>) => void;
+  onCancel: (actionId: string) => void;
+  isPending: boolean;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftPayload, setDraftPayload] = useState(() => JSON.stringify(action.inputPayload, null, 2));
+  const [draftError, setDraftError] = useState<string | null>(null);
   const p = action.inputPayload;
   const colorClass = ACTION_COLORS[action.actionType] ?? "bg-zinc-100 text-zinc-700 border-zinc-200";
   const statusClass = STATUS_COLORS[action.status] ?? "bg-zinc-100 text-zinc-500";
+  const canConfirm = action.status === "proposed" && !p.ambiguous;
+  const canCancel = action.status === "proposed";
+  const followUpAction = extractFollowUpAction(action);
+
+  function parseDraftPayload() {
+    try {
+      const parsed: unknown = JSON.parse(draftPayload);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        setDraftError("Payload must be a JSON object.");
+        return null;
+      }
+
+      setDraftError(null);
+      return parsed as Record<string, unknown>;
+    } catch {
+      setDraftError("Payload must be valid JSON.");
+      return null;
+    }
+  }
+
+  function confirmWithDraft() {
+    if (!isEditing) {
+      onConfirm(action.id);
+      return;
+    }
+
+    const parsed = parseDraftPayload();
+    if (!parsed) return;
+    onConfirm(action.id, parsed);
+  }
 
   return (
     <div className={`rounded-lg border p-3 space-y-2 ${colorClass}`}>
@@ -62,19 +123,38 @@ function ActionCard({ action }: { action: AiAction }) {
       </div>
 
       <div className="space-y-1 bg-white/60 rounded p-2">
-        <PayloadRow label="title" value={p.title} />
-        <PayloadRow label="dueAt" value={p.dueAt} />
-        <PayloadRow label="startTime" value={p.startTime} />
-        <PayloadRow label="endTime" value={p.endTime} />
-        <PayloadRow label="priority" value={p.priority} />
-        <PayloadRow label="cognitiveLoad" value={p.cognitiveLoad} />
-        <PayloadRow label="type" value={p.type} />
-        <PayloadRow label="workType" value={p.workType} />
-        <PayloadRow label="timeframe" value={p.timeframe} />
-        <PayloadRow label="description" value={p.description} />
-        <PayloadRow label="operation" value={p.operation} />
-        <PayloadRow label="isAllDay" value={p.isAllDay} />
-        <PayloadRow label="ambiguous" value={p.ambiguous} />
+        {isEditing ? (
+          <div className="space-y-2">
+            <textarea
+              value={draftPayload}
+              onChange={(event) => {
+                setDraftPayload(event.target.value);
+                setDraftError(null);
+              }}
+              rows={10}
+              className="w-full resize-y rounded-md border border-white/80 bg-white p-2 font-mono text-xs text-zinc-800 outline-none focus:border-zinc-400"
+            />
+            {draftError && <div className="text-xs font-medium text-red-600">{draftError}</div>}
+          </div>
+        ) : (
+          <>
+            <PayloadRow label="title" value={p.title} />
+            <PayloadRow label="dueAt" value={p.dueAt} />
+            <PayloadRow label="startTime" value={p.startTime} />
+            <PayloadRow label="endTime" value={p.endTime} />
+            <PayloadRow label="priority" value={p.priority} />
+            <PayloadRow label="cognitiveLoad" value={p.cognitiveLoad} />
+            <PayloadRow label="type" value={p.type} />
+            <PayloadRow label="workType" value={p.workType} />
+            <PayloadRow label="timeframe" value={p.timeframe} />
+            <PayloadRow label="description" value={p.description} />
+            <PayloadRow label="operation" value={p.operation} />
+            <PayloadRow label="isAllDay" value={p.isAllDay} />
+            <PayloadRow label="estimatedMinutes" value={p.estimatedMinutes} />
+            <PayloadRow label="trigger" value={p.trigger} />
+            <PayloadRow label="ambiguous" value={p.ambiguous} />
+          </>
+        )}
         {action.requiresConfirmation && (
           <div className="text-xs text-amber-600 font-medium pt-1">⚠ Requires confirmation</div>
         )}
@@ -84,12 +164,66 @@ function ActionCard({ action }: { action: AiAction }) {
         {action.status === "executed" && action.resultPayload && (
           <div className="text-xs text-green-700 font-medium pt-1">✓ Saved to DB</div>
         )}
+        {followUpAction && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
+            Schedule impact detected. A revised schedule proposal action is ready below.
+          </div>
+        )}
       </div>
+
+      {(canConfirm || canCancel) && (
+        <div className="flex justify-end gap-2">
+          {canConfirm && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => {
+                setIsEditing((current) => !current);
+                setDraftPayload(JSON.stringify(action.inputPayload, null, 2));
+                setDraftError(null);
+              }}
+              className="rounded-md border border-white/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50"
+            >
+              {isEditing ? "Close edit" : "Edit"}
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => onCancel(action.id)}
+              className="rounded-md border border-white/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          )}
+          {canConfirm && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={confirmWithDraft}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {isPending ? "Working..." : "Confirm"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function Message({ entry }: { entry: ChatEntry }) {
+function Message({
+  entry,
+  onConfirm,
+  onCancel,
+  pendingActionIds,
+}: {
+  entry: ChatEntry;
+  onConfirm: (actionId: string, inputPayload?: Record<string, unknown>) => void;
+  onCancel: (actionId: string) => void;
+  pendingActionIds: Set<string>;
+}) {
   const isUser = entry.role === "user";
   return (
     <div className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
@@ -116,7 +250,13 @@ function Message({ entry }: { entry: ChatEntry }) {
       {entry.actions && entry.actions.length > 0 && (
         <div className="w-full max-w-sm space-y-2">
           {entry.actions.map((action) => (
-            <ActionCard key={action.id} action={action} />
+            <ActionCard
+              key={action.id}
+              action={action}
+              onConfirm={onConfirm}
+              onCancel={onCancel}
+              isPending={pendingActionIds.has(action.id)}
+            />
           ))}
         </div>
       )}
@@ -138,6 +278,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [isRecording, setIsRecording] = useState(false);
+  const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -167,6 +308,77 @@ export default function ChatPage() {
       { role: "assistant", content: summary, actions: data.proposedActions },
     ]);
   }, []);
+
+  function replaceActionInMessages(action: AiAction) {
+    const followUpAction = extractFollowUpAction(action);
+
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (!message.actions?.some((existingAction) => existingAction.id === action.id)) {
+          return message;
+        }
+
+        const nextActions = message.actions.map((existingAction) =>
+          existingAction.id === action.id ? action : existingAction,
+        );
+
+        if (followUpAction && !nextActions.some((existingAction) => existingAction.id === followUpAction.id)) {
+          nextActions.push(followUpAction);
+        }
+
+        return {
+          ...message,
+          actions: nextActions,
+        };
+      }),
+    );
+  }
+
+  async function updateAction(
+    actionId: string,
+    operation: "confirm" | "cancel",
+    inputPayload?: Record<string, unknown>,
+  ) {
+    if (pendingActionIds.has(actionId)) return;
+
+    setPendingActionIds((prev) => new Set(prev).add(actionId));
+
+    try {
+      const res = await fetch(`/api/ai-actions/${actionId}/${operation}`, {
+        method: "POST",
+        headers: inputPayload ? { "Content-Type": "application/json" } : undefined,
+        body: inputPayload ? JSON.stringify({ inputPayload }) : undefined,
+      });
+      const json = (await res.json()) as ActionResult;
+
+      if (!res.ok || !json.data) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: json.error ?? `Could not ${operation} that action.`,
+          },
+        ]);
+        return;
+      }
+
+      replaceActionInMessages(json.data);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Network error while trying to ${operation} that action.`,
+        },
+      ]);
+    } finally {
+      setPendingActionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(actionId);
+        return next;
+      });
+    }
+  }
 
   async function startRecording() {
     if (loading || isRecording) return;
@@ -366,7 +578,13 @@ export default function ChatPage() {
         )}
 
         {messages.map((entry, i) => (
-          <Message key={i} entry={entry} />
+          <Message
+            key={i}
+            entry={entry}
+            onConfirm={(actionId, inputPayload) => void updateAction(actionId, "confirm", inputPayload)}
+            onCancel={(actionId) => void updateAction(actionId, "cancel")}
+            pendingActionIds={pendingActionIds}
+          />
         ))}
 
         {loading && (

@@ -6,6 +6,7 @@ import type * as ChatService from "@/lib/services/chat";
 import type * as DashboardService from "@/lib/services/dashboard";
 import type * as MockParser from "@/lib/ai/mockParser";
 import type * as GeminiParser from "@/lib/ai/geminiParser";
+import type * as InsightsService from "@/lib/services/insights";
 import type * as ScheduledBlocksService from "@/lib/services/scheduledBlocks";
 import type * as TasksService from "@/lib/services/tasks";
 import type * as UploadsService from "@/lib/services/uploads";
@@ -23,6 +24,8 @@ let validateChatMessageBody: typeof ChatService.validateChatMessageBody;
 let parseDashboardDate: typeof DashboardService.parseDashboardDate;
 let parseMockChatMessage: typeof MockParser.parseMockChatMessage;
 let validateGeminiResponse: typeof GeminiParser.validateGeminiResponse;
+let validateCurrentInsightsQuery: typeof InsightsService.validateCurrentInsightsQuery;
+let validateGenerateInsightBody: typeof InsightsService.validateGenerateInsightBody;
 let validateScheduledBlockPatchBody: typeof ScheduledBlocksService.validateScheduledBlockPatchBody;
 let validateGenerateScheduleBody: typeof ScheduledBlocksService.validateGenerateScheduleBody;
 let findFirstAvailableSlot: typeof ScheduledBlocksService.findFirstAvailableSlot;
@@ -37,6 +40,7 @@ before(async () => {
   const dashboardService = await import("@/lib/services/dashboard");
   const mockParser = await import("@/lib/ai/mockParser");
   const geminiParser = await import("@/lib/ai/geminiParser");
+  const insightsService = await import("@/lib/services/insights");
   const scheduledBlocksService = await import("@/lib/services/scheduledBlocks");
   const uploadsService = await import("@/lib/services/uploads");
 
@@ -51,6 +55,8 @@ before(async () => {
   parseDashboardDate = dashboardService.parseDashboardDate;
   parseMockChatMessage = mockParser.parseMockChatMessage;
   validateGeminiResponse = geminiParser.validateGeminiResponse;
+  validateCurrentInsightsQuery = insightsService.validateCurrentInsightsQuery;
+  validateGenerateInsightBody = insightsService.validateGenerateInsightBody;
   validateScheduledBlockPatchBody = scheduledBlocksService.validateScheduledBlockPatchBody;
   validateGenerateScheduleBody = scheduledBlocksService.validateGenerateScheduleBody;
   findFirstAvailableSlot = scheduledBlocksService.findFirstAvailableSlot;
@@ -237,6 +243,48 @@ test("schedule slot finder avoids busy windows and honors work hours", () => {
   assert.equal(slot.endTime.toISOString(), new Date("2026-05-11T11:00:00-07:00").toISOString());
 });
 
+test("current insights query validation accepts scope and bounded limit", () => {
+  const valid = validateCurrentInsightsQuery(new URLSearchParams({ scope: "weekly", limit: "10" }));
+  const badScope = validateCurrentInsightsQuery(new URLSearchParams({ scope: "monthly" }));
+  const badLimit = validateCurrentInsightsQuery(new URLSearchParams({ limit: "50" }));
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.scope, "weekly");
+    assert.equal(valid.value.limit, 10);
+  }
+
+  assert.equal(badScope.ok, false);
+  assert.match(badScope.ok ? "" : badScope.error, /scope must be daily or weekly/);
+
+  assert.equal(badLimit.ok, false);
+  assert.match(badLimit.ok ? "" : badLimit.error, /limit must be an integer/);
+});
+
+test("generate insight validation accepts planning session and rejects bad ranges", () => {
+  const valid = validateGenerateInsightBody({
+    scope: "planning_session",
+    planningCycleId: "demo_cycle_2026_05_11",
+    start: "2026-05-11T00:00:00-07:00",
+    end: "2026-05-18T00:00:00-07:00",
+    trigger: "weekly_planning",
+  });
+  const invalid = validateGenerateInsightBody({
+    scope: "weekly",
+    start: "2026-05-18T00:00:00-07:00",
+    end: "2026-05-11T00:00:00-07:00",
+  });
+
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.scope, "planning_session");
+    assert.equal(valid.value.trigger, "weekly_planning");
+  }
+
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.ok ? "" : invalid.error, /end must be after start/);
+});
+
 test("daily check-in validation accepts required fields and adjustToday", () => {
   const result = validateDailyCheckinBody({
     planningCycleId: "demo_cycle_2026_05_11",
@@ -332,6 +380,13 @@ test("mock parser treats implicit midterm study request as a proposed task", () 
   const startTime = new Date(eventAction?.inputPayload.startTime as string);
   const endTime = new Date(eventAction?.inputPayload.endTime as string);
   assert.equal(endTime.getTime() - startTime.getTime(), 60 * 60_000);
+});
+
+test("mock parser warns high-difficulty study tasks can affect the schedule", () => {
+  const actions = parseMockChatMessage("i have a bio midterm on wednesday at 1pm and need to study");
+  const taskAction = actions.find((action) => action.actionType === "CREATE_TASK");
+
+  assert.match(taskAction?.assistantSummary ?? "", /confirm before I add it/i);
 });
 
 test("mock parser requires confirmation or clarification for updates", () => {

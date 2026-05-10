@@ -192,6 +192,40 @@ function inferEventWindow(text: string) {
   return { startTime, endTime };
 }
 
+function normalizeComparableText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(the|a|an|my|for|at|on)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleLooksSimilar(a: string, b: string) {
+  const left = normalizeComparableText(a);
+  const right = normalizeComparableText(b);
+
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (left.includes(right) || right.includes(left)) return true;
+
+  const leftWords = new Set(left.split(" "));
+  const rightWords = new Set(right.split(" "));
+  const overlap = [...leftWords].filter((word) => rightWords.has(word)).length;
+
+  return overlap >= 2 && overlap / Math.min(leftWords.size, rightWords.size) >= 0.67;
+}
+
+function startOfDay(date: Date) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function minutesBetweenDates(a: Date, b: Date) {
+  return Math.abs(a.getTime() - b.getTime()) / 60_000;
+}
+
 function buildBreakdownPreview(workType: string, estimatedMinutes: number, cognitiveLoad: number) {
   const templates: Record<string, string[]> = {
     study: ["Review notes and key concepts", "Work practice problems", "Self-test and summarize weak spots"],
@@ -240,6 +274,9 @@ function normalizeCreateTaskAction(action: MockParsedAction, originalText: strin
   const breakdownPreview = estimatedMinutes && cognitiveLoad
     ? buildBreakdownPreview(workType, estimatedMinutes, cognitiveLoad)
     : undefined;
+  const scheduleImpactText = (priority ?? 3) <= 2 || (cognitiveLoad ?? 4) >= 6
+    ? " This is likely to affect your current plan, so after it is saved I can generate a revised schedule proposal."
+    : "";
 
   return {
     ...action,
@@ -262,8 +299,8 @@ function normalizeCreateTaskAction(action: MockParsedAction, originalText: strin
     assistantSummary: missingPlanningInputs
       ? `I can create "${title || "that task"}", but I need estimated time and difficulty before adding it.`
       : requiresReview
-        ? `I estimated "${title}" as ${estimatedMinutes} minutes with difficulty ${cognitiveLoad}/7 and prepared a ${breakdownPreview?.length ?? 0}-step breakdown. Please confirm before I add it.`
-        : action.assistantSummary,
+        ? `I estimated "${title}" as ${estimatedMinutes} minutes with difficulty ${cognitiveLoad}/7 and prepared a ${breakdownPreview?.length ?? 0}-step breakdown. Please confirm before I add it.${scheduleImpactText}`
+        : `${action.assistantSummary}${scheduleImpactText}`,
   };
 }
 
@@ -440,6 +477,58 @@ async function executeCreateTask(userId: string, action: MockParsedAction) {
   };
 }
 
+function taskNeedsScheduleImpact(task: { priority: number; cognitiveLoad: number; dueAt: Date | null; estimatedMinutes: number | null }) {
+  if (task.priority <= 2 || task.cognitiveLoad >= 6) {
+    return true;
+  }
+
+  if (!task.dueAt) {
+    return false;
+  }
+
+  return task.dueAt.getTime() - Date.now() <= 3 * 24 * 60 * 60_000;
+}
+
+async function createScheduleImpactAction(params: {
+  userId: string;
+  threadId?: string | null;
+  messageId?: string | null;
+  task: { id: string; title: string; planningCycleId: string | null; priority: number; cognitiveLoad: number; dueAt: Date | null; estimatedMinutes: number | null };
+}) {
+  const { userId, threadId, messageId, task } = params;
+
+  if (!taskNeedsScheduleImpact(task)) {
+    return null;
+  }
+
+  return prisma.aiAction.create({
+    data: {
+      userId,
+      threadId,
+      messageId,
+      actionType: "GENERATE_SCHEDULE",
+      status: "proposed",
+      requiresConfirmation: true,
+      inputPayload: jsonObject({
+        planningCycleId: task.planningCycleId,
+        trigger: "task_added",
+        taskId: task.id,
+        rawText: `Generate a revised schedule proposal after adding "${task.title}".`,
+        ambiguous: false,
+        scheduleImpact: {
+          reason: "This task is high priority, high difficulty, or due soon, so it may need to change the current schedule.",
+          taskId: task.id,
+          title: task.title,
+          priority: task.priority,
+          cognitiveLoad: task.cognitiveLoad,
+          dueAt: task.dueAt?.toISOString() ?? null,
+          estimatedMinutes: task.estimatedMinutes,
+        },
+      }),
+    },
+  });
+}
+
 async function executeCreateEvent(userId: string, action: MockParsedAction) {
   const payload = action.inputPayload;
   const title = typeof payload.title === "string" ? payload.title : "";
@@ -448,6 +537,31 @@ async function executeCreateEvent(userId: string, action: MockParsedAction) {
 
   if (!title || !startTime || !endTime) {
     throw new Error("Event title, startTime, and endTime are required.");
+  }
+
+  const dayStart = startOfDay(startTime);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
+  const possibleDuplicates = await prisma.calendarEvent.findMany({
+    where: {
+      userId,
+      status: { not: "cancelled" },
+      startTime: { lt: dayEnd },
+      endTime: { gt: dayStart },
+    },
+    orderBy: { startTime: "asc" },
+  });
+  const duplicate = possibleDuplicates.find((event) => {
+    const sameTitle = titleLooksSimilar(event.title, title);
+    const sameStart = minutesBetweenDates(event.startTime, startTime) <= 15;
+    const overlapping = event.startTime < endTime && event.endTime > startTime;
+
+    return sameTitle && (sameStart || overlapping);
+  });
+
+  if (duplicate) {
+    throw new Error(
+      `Possible duplicate event found: "${duplicate.title}" from ${duplicate.startTime.toISOString()} to ${duplicate.endTime.toISOString()}. Edit this action if this is a different event, or cancel it.`,
+    );
   }
 
   const event = await prisma.calendarEvent.create({
@@ -551,12 +665,21 @@ async function recordAndMaybeExecuteAction(params: {
 
   try {
     const result = await executeAction(userId, action);
+    const proposedScheduleAction =
+      action.actionType === "CREATE_TASK" && "task" in result
+        ? await createScheduleImpactAction({
+            userId,
+            threadId,
+            messageId,
+            task: result.task,
+          })
+        : null;
 
     return prisma.aiAction.update({
       where: { id: aiAction.id },
       data: {
         status: "executed",
-        resultPayload: jsonObject(result),
+        resultPayload: jsonObject({ ...result, proposedScheduleAction }),
         executedAt: new Date(),
       },
     });
@@ -673,7 +796,11 @@ export async function listThreadMessages(userId: string, threadId: string) {
   return { ok: true as const, value: messages };
 }
 
-export async function confirmAiAction(userId: string, actionId: string) {
+export async function confirmAiAction(
+  userId: string,
+  actionId: string,
+  overrides: { inputPayload?: Record<string, unknown> } = {},
+) {
   const aiAction = await prisma.aiAction.findFirst({
     where: { id: actionId, userId },
   });
@@ -686,7 +813,10 @@ export async function confirmAiAction(userId: string, actionId: string) {
     return { ok: false as const, error: `AI action is already ${aiAction.status}.`, status: 400 };
   }
 
-  const inputPayload = aiAction.inputPayload as Record<string, unknown>;
+  const inputPayload = {
+    ...(aiAction.inputPayload as Record<string, unknown>),
+    ...(overrides.inputPayload ?? {}),
+  };
   if (inputPayload.ambiguous) {
     return { ok: false as const, error: "AI action needs clarification before it can be confirmed.", status: 400 };
   }
@@ -699,12 +829,22 @@ export async function confirmAiAction(userId: string, actionId: string) {
       inputPayload,
       assistantSummary: "",
     });
+    const proposedScheduleAction =
+      aiAction.actionType === "CREATE_TASK" && "task" in result
+        ? await createScheduleImpactAction({
+            userId,
+            threadId: aiAction.threadId,
+            messageId: aiAction.messageId,
+            task: result.task,
+          })
+        : null;
 
     const updatedAction = await prisma.aiAction.update({
       where: { id: aiAction.id },
       data: {
         status: "executed",
-        resultPayload: jsonObject(result),
+        inputPayload: jsonObject(inputPayload),
+        resultPayload: jsonObject({ ...result, proposedScheduleAction }),
         executedAt: new Date(),
       },
     });
