@@ -785,6 +785,7 @@ export default function ChatPage() {
               entry={entry}
               onConfirm={(actionId) => void updateAction(actionId, "confirm")}
               onCancel={(actionId) => void updateAction(actionId, "cancel")}
+              onCheckinSubmit={(text) => void send(text)}
               pendingActionIds={pendingActionIds}
               onImageClick={setLightboxSrc}
             />

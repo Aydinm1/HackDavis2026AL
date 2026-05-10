@@ -115,9 +115,11 @@ function EventCard({
 }) {
   const pLevel = priorityLevel(item.priority);
   const dLevel = difficultyLevel(item.cognitiveLoad);
+  const isEvent = item.kind === "event";
+  const glowColor = isEvent ? "183, 38, 193" : "61, 149, 169";
 
   const inner = (
-    <>
+    <div className="relative z-10">
       <div className="flex items-start justify-between gap-3">
         <p className="font-semibold text-[#F5F5F5]">{item.title}</p>
         <div className="caption shrink-0 text-[10px] text-[#A0A0A0]">
@@ -130,22 +132,41 @@ function EventCard({
           <Indicator level={dLevel} suffix="Difficulty" />
         </div>
       )}
-    </>
+    </div>
   );
+  const backgroundGlow = (
+    <div
+      className="pointer-events-none absolute -right-16 -top-20 h-72 w-72"
+      style={{
+        borderRadius: "288.813px",
+        background: `linear-gradient(199deg, rgba(${glowColor}, 0.20) 32.23%, rgba(${glowColor}, 0.00) 101.41%)`,
+        filter: "blur(55px)",
+      }}
+    />
+  );
+  const cardClassName = `relative overflow-hidden rounded-2xl border p-4 ${
+    isEvent ? "border-[#B726C1]/20 bg-[#101010]" : "border-[#3D95A9]/20 bg-[#101010]"
+  }`;
 
   if (onEdit) {
     return (
       <button
         type="button"
         onClick={onEdit}
-        className="w-full rounded-2xl border border-white/5 p-4 text-left transition-colors hover:border-white/10 hover:bg-white/[0.04]"
+        className={`${cardClassName} w-full text-left transition-colors hover:border-white/10 hover:bg-white/[0.04]`}
       >
+        {backgroundGlow}
         {inner}
       </button>
     );
   }
 
-  return <div className="rounded-2xl border border-white/5 p-4">{inner}</div>;
+  return (
+    <div className={cardClassName}>
+      {backgroundGlow}
+      {inner}
+    </div>
+  );
 }
 
 function EventSheet({

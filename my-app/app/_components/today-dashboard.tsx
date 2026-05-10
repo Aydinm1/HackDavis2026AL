@@ -174,18 +174,27 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
         <article className="flex flex-col gap-3">
           {/* First insight — full width rectangle */}
           {dashboard.insights[0] && (
-            <div className="rounded-2xl bg-[#1a1f1a] p-5">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="relative overflow-hidden rounded-2xl bg-[#1a1f1a] p-5">
+              <div
+                className="pointer-events-none absolute -right-16 -top-24 h-[303px] w-[303px]"
+                style={{
+                  borderRadius: "303.043px",
+                  background:
+                    "linear-gradient(199deg, rgba(54, 181, 57, 0.20) 32.23%, rgba(54, 181, 57, 0.00) 101.41%)",
+                  filter: "blur(55px)",
+                }}
+              />
+              <div className="relative z-10 flex flex-wrap items-center gap-2">
                 <h3 className="font-semibold text-[#F5F5F5]">{dashboard.insights[0].title}</h3>
                 <span className="text-xs text-zinc-500">{dashboard.insights[0].scope}</span>
               </div>
-              <p className="mt-2 text-sm text-[#A0A0A0]">{dashboard.insights[0].body}</p>
+              <p className="relative z-10 mt-2 text-sm text-[#A0A0A0]">{dashboard.insights[0].body}</p>
             </div>
           )}
 
           {/* Yesterday stats — 2 column grid */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-[#1a1f1a] p-5 ">
+            <div className="rounded-2xl bg-[#1a1f1a] p-5">
               <p
                 className="mt-2"
                 style={{
@@ -199,7 +208,7 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
               >
                 {dashboard.yesterdayEventsAttended}
               </p>
-              <p className="mt-1 text-xs text-[#A0A0A0] pt-2">Events attended yesterday</p>
+              <p className="mt-1 pt-2 text-xs text-[#A0A0A0]">Events attended yesterday</p>
             </div>
             <div className="rounded-2xl bg-[#1a1f1a] p-5">
               <p
@@ -215,7 +224,7 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
               >
                 {dashboard.yesterdayTasksCompleted}
               </p>
-              <p className="mt-1 text-xs text-[#A0A0A0] pt-2">Tasks completed yesterday</p>
+              <p className="mt-1 pt-2 text-xs text-[#A0A0A0]">Tasks completed yesterday</p>
             </div>
           </div>
         </article>

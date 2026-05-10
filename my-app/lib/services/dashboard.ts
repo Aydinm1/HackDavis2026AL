@@ -68,7 +68,10 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
   const eventAnchor = now > range.start && now < range.end ? now : range.start;
   const checkinLogDelegate = getCheckinLogDelegate();
 
-  const [checkin, latestCheckinLog, todayCheckinLogs, nextCalendarEvent, todayBlocks, topTasks, insights] = await Promise.all([
+  const yesterdayStart = new Date(range.start.getTime() - 24 * 60 * 60_000);
+  const yesterdayEnd = range.start;
+
+  const [checkin, latestCheckinLog, todayCheckinLogs, nextCalendarEvent, todayBlocks, topTasks, insights, yesterdayEventsAttended, yesterdayTasksCompleted] = await Promise.all([
     prisma.dailyCheckin.findUnique({
       where: {
         userId_checkinDate: {
@@ -145,6 +148,20 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
       orderBy: { createdAt: "desc" },
       take: 5,
     }),
+    prisma.calendarEvent.count({
+      where: {
+        userId,
+        status: { not: "cancelled" },
+        startTime: { gte: yesterdayStart, lt: yesterdayEnd },
+      },
+    }),
+    prisma.task.count({
+      where: {
+        userId,
+        status: "completed",
+        updatedAt: { gte: yesterdayStart, lt: yesterdayEnd },
+      },
+    }),
   ]);
 
   return {
@@ -156,5 +173,7 @@ export async function getTodayDashboard(userId: string, range: DashboardDateRang
     todayBlocks,
     topTasks,
     insights,
+    yesterdayEventsAttended,
+    yesterdayTasksCompleted,
   };
 }
