@@ -1,5 +1,6 @@
 import { getCurrentUserId } from "@/lib/auth";
 import { getTodayDashboard, parseDashboardDate } from "@/lib/services/dashboard";
+import { TodayBlocksClient, type TodayBlockViewModel } from "@/app/_components/today-blocks-client";
 
 const defaultDemoDate = "2026-05-11";
 
@@ -39,13 +40,6 @@ function minutesBetween(startTime: Date, endTime: Date) {
   return Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
 }
 
-function statusClass(status: string) {
-  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "accepted") return "border-blue-200 bg-blue-50 text-blue-700";
-  if (status === "skipped") return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-violet-200 bg-violet-50 text-violet-700";
-}
-
 function insightClass(severity: string) {
   if (severity === "urgent") return "border-red-200 bg-red-50";
   if (severity === "caution") return "border-amber-200 bg-amber-50";
@@ -73,6 +67,15 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
     0,
   );
   const highLoadBlocks = dashboard.todayBlocks.filter((block) => (block.task?.cognitiveLoad ?? 0) >= 6);
+  const todayBlocks: TodayBlockViewModel[] = dashboard.todayBlocks.map((block) => ({
+    id: block.id,
+    title: block.title,
+    subtitle: block.task?.title ?? block.taskBreakdown?.title ?? "Scheduled work",
+    startTime: block.startTime.toISOString(),
+    endTime: block.endTime.toISOString(),
+    status: block.status,
+    schedulingReason: block.schedulingReason,
+  }));
 
   return (
     <main className="min-h-screen bg-zinc-50 px-5 py-8 pb-28 font-sans text-zinc-950">
@@ -151,36 +154,7 @@ export async function TodayDashboard({ searchParams }: TodayDashboardProps) {
         <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
           <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold text-zinc-950">Today&apos;s blocks</h2>
-            <div className="mt-3 grid gap-3">
-              {dashboard.todayBlocks.length > 0 ? (
-                dashboard.todayBlocks.map((block) => (
-                  <div key={block.id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold text-zinc-950">{block.title}</h3>
-                          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClass(block.status)}`}>
-                            {block.status}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-sm text-zinc-600">
-                          {block.task?.title ?? block.taskBreakdown?.title ?? "Scheduled work"}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-sm font-medium text-zinc-800 sm:text-right">
-                        {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                        <div className="text-xs font-normal text-zinc-500">{minutesBetween(block.startTime, block.endTime)} min</div>
-                      </div>
-                    </div>
-                    {block.schedulingReason && (
-                      <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs text-zinc-600">{block.schedulingReason}</p>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-zinc-500">No scheduled work blocks for this date.</p>
-              )}
-            </div>
+            <TodayBlocksClient initialBlocks={todayBlocks} />
           </article>
 
           <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">

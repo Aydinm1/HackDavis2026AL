@@ -72,6 +72,26 @@ function formatDate(date: string | null) {
   }).format(new Date(date));
 }
 
+function formatBlockWindow(startTime: string, endTime: string) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  const day = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(start);
+  const startLabel = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(start);
+  const endLabel = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(end);
+
+  return `${day}, ${startLabel} - ${endLabel}`;
+}
+
 function formatForInput(date: string | null) {
   if (!date) return "";
   const parsed = new Date(date);
@@ -398,6 +418,42 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
     }
   }
 
+  async function completeTask(taskId: string) {
+    setError(null);
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    if (!task) return;
+
+    const actualMinutesText = window.prompt(
+      `Actual minutes for "${task.title}"? Leave blank to skip.`,
+      task.estimatedMinutes ? String(task.estimatedMinutes) : "",
+    );
+    if (actualMinutesText === null) return;
+
+    const trimmed = actualMinutesText.trim();
+    const actualMinutes = trimmed ? Number(trimmed) : undefined;
+    if (actualMinutes !== undefined && (!Number.isInteger(actualMinutes) || actualMinutes < 0)) {
+      setError("Actual minutes must be a whole number.");
+      return;
+    }
+
+    setBusyTaskId(taskId);
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(actualMinutes === undefined ? {} : { actualMinutes }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to complete task.");
+      setTasks((current) => current.map((candidate) => (candidate.id === taskId ? body.data : candidate)));
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to complete task.");
+    } finally {
+      setBusyTaskId(null);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <header className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm sm:flex-row sm:items-end sm:justify-between">
@@ -501,7 +557,32 @@ export function TasksClient({ initialTasks }: { initialTasks: TaskViewModel[] })
                   </div>
                 </div>
 
+                {task.scheduledBlocks.length > 0 && (
+                  <div className="mt-4 border-t border-zinc-100 pt-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scheduled blocks</h3>
+                    <div className="mt-2 grid gap-2">
+                      {task.scheduledBlocks.map((block) => (
+                        <div
+                          key={block.id}
+                          className="flex flex-col gap-1 rounded-md bg-blue-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <span className="font-medium text-zinc-800">{formatBlockWindow(block.startTime, block.endTime)}</span>
+                          <span className="text-xs font-medium text-blue-700">{block.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => completeTask(task.id)}
+                    disabled={busyTaskId === task.id || task.status === "completed" || task.status === "cancelled"}
+                    className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-50 disabled:text-zinc-400"
+                  >
+                    {busyTaskId === task.id ? "Saving..." : "Complete"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => openEditForm(task)}

@@ -291,7 +291,7 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Add task creation form.
 - [x] Add edit actions.
 - [x] Add soft-delete/cancel action.
-- [ ] Add complete action.
+- [x] Add complete action.
 - [x] Add cognitive load control.
 - [x] Add estimated minutes field.
 - [ ] Add task breakdown button.
@@ -303,7 +303,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 - [x] Show calendar events and scheduled blocks together.
 - [x] Add delete control for calendar events.
 - [x] Add generate schedule button.
-- [ ] Add complete/skip/move controls for blocks.
+- [x] Add complete/skip controls for blocks.
+- [ ] Add move controls for blocks.
 - [x] Show block status and scheduling reason.
 
 ### Chat Page
@@ -429,8 +430,8 @@ Core rule: tasks, calendar events, scheduled blocks, check-ins, AI insights, AI 
 
 ## Recommended Next Build Order
 
-1. [ ] Add complete controls for task cards and scheduled blocks.
-2. [ ] Add daily check-in form to dashboard.
+1. [ ] Add daily check-in form to dashboard.
+2. [ ] Add move controls for scheduled blocks.
 3. [ ] Load existing chat thread history from APIs.
 4. [ ] Align upload endpoints with current frontend `imageData/audioData/mimeType` payloads.
 5. [ ] Finish voice/image Gemini flow and confirmation cards.

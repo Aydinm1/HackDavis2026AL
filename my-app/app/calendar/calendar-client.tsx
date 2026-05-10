@@ -33,6 +33,12 @@ type UnscheduledTask = {
   remainingMinutes: number;
 };
 
+type RescheduleSuggestion = {
+  startTime: string;
+  endTime: string;
+  reason: string;
+} | null;
+
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -84,8 +90,13 @@ export function CalendarClient({
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
+  const [busyBlockId, setBusyBlockId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [unscheduledTasks, setUnscheduledTasks] = useState<UnscheduledTask[]>([]);
+  const [rescheduleSuggestion, setRescheduleSuggestion] = useState<{
+    title: string;
+    suggestion: RescheduleSuggestion;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const groupedItems = useMemo(
@@ -156,6 +167,58 @@ export function CalendarClient({
     }
   }
 
+  async function completeBlock(item: CalendarItemViewModel) {
+    setError(null);
+    setRescheduleSuggestion(null);
+    setBusyBlockId(item.id);
+
+    try {
+      const response = await fetch(`/api/scheduled-blocks/${item.id}/complete`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to complete scheduled block.");
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.kind === "block" && candidate.id === item.id
+            ? { ...candidate, status: body.data.scheduledBlock.status }
+            : candidate,
+        ),
+      );
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to complete scheduled block.");
+    } finally {
+      setBusyBlockId(null);
+    }
+  }
+
+  async function skipBlock(item: CalendarItemViewModel) {
+    setError(null);
+    setRescheduleSuggestion(null);
+    setBusyBlockId(item.id);
+
+    try {
+      const response = await fetch(`/api/scheduled-blocks/${item.id}/skip`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Failed to skip scheduled block.");
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.kind === "block" && candidate.id === item.id
+            ? { ...candidate, status: body.data.scheduledBlock.status }
+            : candidate,
+        ),
+      );
+      setRescheduleSuggestion({
+        title: item.title,
+        suggestion: body.data.suggestion ?? null,
+      });
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to skip scheduled block.");
+    } finally {
+      setBusyBlockId(null);
+    }
+  }
+
   return (
     <section className="grid gap-5">
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -191,6 +254,20 @@ export function CalendarClient({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {rescheduleSuggestion && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <h2 className="font-semibold">Reschedule suggestion</h2>
+          {rescheduleSuggestion.suggestion ? (
+            <p className="mt-1">
+              {rescheduleSuggestion.title}: {formatTime(rescheduleSuggestion.suggestion.startTime)} -{" "}
+              {formatTime(rescheduleSuggestion.suggestion.endTime)}. {rescheduleSuggestion.suggestion.reason}
+            </p>
+          ) : (
+            <p className="mt-1">No same-day opening was found for {rescheduleSuggestion.title}.</p>
+          )}
         </div>
       )}
 
@@ -236,6 +313,26 @@ export function CalendarClient({
                       className="rounded-md border border-red-200 bg-white/80 px-3 py-2 text-sm font-semibold text-red-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
                     >
                       {busyEventId === item.id ? "Deleting..." : "Delete event"}
+                    </button>
+                  </div>
+                )}
+                {item.kind === "block" && (
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => completeBlock(item)}
+                      disabled={busyBlockId === item.id || item.status === "completed" || item.status === "skipped"}
+                      className="rounded-md border border-emerald-200 bg-white/80 px-3 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                    >
+                      {busyBlockId === item.id ? "Saving..." : "Complete"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => skipBlock(item)}
+                      disabled={busyBlockId === item.id || item.status === "completed" || item.status === "skipped"}
+                      className="rounded-md border border-amber-200 bg-white/80 px-3 py-2 text-sm font-semibold text-amber-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                    >
+                      {busyBlockId === item.id ? "Saving..." : "Skip"}
                     </button>
                   </div>
                 )}
