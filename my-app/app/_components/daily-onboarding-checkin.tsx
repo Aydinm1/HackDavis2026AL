@@ -116,8 +116,8 @@ export function DailyOnboardingCheckin({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] overflow-hidden bg-stone-950 text-neutral-100">
-      <main className="mx-auto flex h-dvh max-h-dvh w-full max-w-[430px] flex-col justify-between gap-8 overflow-hidden px-5 pb-8 pt-20">
+    <div className="fixed inset-0 z-[80] overflow-y-auto overscroll-contain bg-stone-950 text-neutral-100">
+      <main className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col justify-between gap-8 px-5 pb-8 pt-20">
         <div className="flex flex-col gap-10">
           <h1 className="max-w-[340px] text-4xl font-normal leading-tight text-neutral-100">
             hi {userName}, how are you doing?

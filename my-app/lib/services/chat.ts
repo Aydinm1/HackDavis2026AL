@@ -211,7 +211,7 @@ function inferStudyTitle(text: string) {
 }
 
 function isImplicitStudyTask(text: string) {
-  return /\b(study|review|prepare|prep)\b/i.test(text) && /\b(midterm|exam|test|quiz|final)\b/i.test(text);
+  return /\b(study|studying|review|prepare|prep)\b/i.test(text) && /\b(midterm|exam|test|quiz|final)\b/i.test(text);
 }
 
 function isImplicitCalendarEvent(text: string) {
@@ -339,6 +339,38 @@ export function resolveNextWeekdayDate(text: string, baseDate = new Date()) {
   };
 }
 
+function resolveAllMentionedWeekdays(text: string, baseDate = new Date()) {
+  const matches = Array.from(text.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi));
+  const seen = new Set<string>();
+  const dates: Date[] = [];
+
+  for (const match of matches) {
+    const weekday = match[1].toLowerCase();
+    if (seen.has(weekday)) continue;
+
+    seen.add(weekday);
+    const targetDay = weekdayIndex[weekday];
+    const start = startOfLocalDate(baseDate);
+    const daysUntil = (targetDay - start.getDay() + 7) % 7;
+    dates.push(addDays(start, daysUntil));
+  }
+
+  return dates.sort((a, b) => a.getTime() - b.getTime());
+}
+
+function inferScheduleWindowFromText(text: string) {
+  const weekdays = resolveAllMentionedWeekdays(text);
+  if (weekdays.length === 0) {
+    return null;
+  }
+
+  const start = startOfLocalDate(weekdays[0]);
+  const lastDay = weekdays[weekdays.length - 1];
+  const end = startOfLocalDate(addDays(lastDay, 1));
+
+  return { start, end };
+}
+
 function buildBreakdownPreview(workType: string, estimatedMinutes: number, cognitiveLoad: number) {
   const templates: Record<string, string[]> = {
     study: ["Review notes and key concepts", "Work practice problems", "Self-test and summarize weak spots"],
@@ -365,6 +397,7 @@ function normalizeCreateTaskAction(action: MockParsedAction, originalText: strin
   }
 
   const payload = action.inputPayload;
+  const scheduleWindow = inferScheduleWindowFromText(originalText);
   const workType = typeof payload.workType === "string" && payload.workType !== "focus"
     ? payload.workType
     : inferTaskWorkType(originalText);
@@ -408,6 +441,8 @@ function normalizeCreateTaskAction(action: MockParsedAction, originalText: strin
       createdBy: "chat",
       rawText: originalText,
       breakdownPreview,
+      scheduleStart: typeof payload.scheduleStart === "string" ? payload.scheduleStart : scheduleWindow?.start.toISOString(),
+      scheduleEnd: typeof payload.scheduleEnd === "string" ? payload.scheduleEnd : scheduleWindow?.end.toISOString(),
     },
     assistantSummary: missingPlanningInputs
       ? `I can create "${title || "that task"}", but I need difficulty before adding it.`
@@ -515,12 +550,16 @@ function normalizeGenerateScheduleAction(action: MockParsedAction, originalText:
     return action;
   }
 
+  const inferredWindow = inferScheduleWindowFromText(originalText);
+
   return {
     ...action,
     requiresConfirmation: true,
     ambiguous: false,
     inputPayload: {
       ...action.inputPayload,
+      start: typeof action.inputPayload.start === "string" ? action.inputPayload.start : inferredWindow?.start.toISOString(),
+      end: typeof action.inputPayload.end === "string" ? action.inputPayload.end : inferredWindow?.end.toISOString(),
       rawText: typeof action.inputPayload.rawText === "string" ? action.inputPayload.rawText : originalText,
       trigger: typeof action.inputPayload.trigger === "string" ? action.inputPayload.trigger : "chat",
       dryRun: typeof action.inputPayload.dryRun === "boolean" ? action.inputPayload.dryRun : true,
@@ -591,7 +630,6 @@ function addImplicitStudyActionIfNeeded(actions: MockParsedAction[], originalTex
   }
 
   return [
-    ...actions,
     normalizeCreateTaskAction(
       {
         actionType: "CREATE_TASK",
@@ -602,6 +640,7 @@ function addImplicitStudyActionIfNeeded(actions: MockParsedAction[], originalTex
       },
       originalText,
     ),
+    ...actions,
   ];
 }
 
@@ -626,7 +665,16 @@ function addImplicitEventActionIfNeeded(actions: MockParsedAction[], originalTex
 }
 
 function normalizeParsedActions(actions: MockParsedAction[], originalText: string) {
-  return addImplicitEventActionIfNeeded(addImplicitStudyActionIfNeeded(actions, originalText), originalText).map((action) =>
+  const withImplicitActions = addImplicitEventActionIfNeeded(addImplicitStudyActionIfNeeded(actions, originalText), originalText);
+  const shouldDeferScheduleUntilTaskExists =
+    isImplicitStudyTask(originalText) &&
+    withImplicitActions.some((action) => action.actionType === "CREATE_TASK") &&
+    withImplicitActions.some((action) => action.actionType === "GENERATE_SCHEDULE");
+  const actionsToNormalize = shouldDeferScheduleUntilTaskExists
+    ? withImplicitActions.filter((action) => action.actionType !== "GENERATE_SCHEDULE")
+    : withImplicitActions;
+
+  return actionsToNormalize.map((action) =>
     normalizeAdjustTodayAction(
       normalizeDailyCheckinAction(
         normalizeGenerateScheduleAction(
@@ -862,6 +910,16 @@ async function getOrCreateThread(userId: string, input: ChatMessageInput) {
 async function executeCreateTask(userId: string, action: MockParsedAction) {
   const payload = action.inputPayload;
   const title = typeof payload.title === "string" ? payload.title : "";
+  const scheduleStart = typeof payload.scheduleStart === "string" ? new Date(payload.scheduleStart) : null;
+  const scheduleEnd = typeof payload.scheduleEnd === "string" ? new Date(payload.scheduleEnd) : null;
+  const scheduleWindow =
+    scheduleStart &&
+    scheduleEnd &&
+    !Number.isNaN(scheduleStart.getTime()) &&
+    !Number.isNaN(scheduleEnd.getTime()) &&
+    scheduleEnd > scheduleStart
+      ? { start: scheduleStart, end: scheduleEnd }
+      : null;
 
   if (!title) {
     throw new Error("Task title is required.");
@@ -889,6 +947,7 @@ async function executeCreateTask(userId: string, action: MockParsedAction) {
   return {
     task,
     taskBreakdowns: breakdown.ok ? breakdown.value.breakdowns : [],
+    scheduleWindow,
   };
 }
 
@@ -904,13 +963,27 @@ function taskNeedsScheduleImpact(task: { priority: number; cognitiveLoad: number
   return task.dueAt.getTime() - Date.now() <= 3 * 24 * 60 * 60_000;
 }
 
+function getScheduleWindowFromResult(result: unknown) {
+  if (!isRecord(result) || !isRecord(result.scheduleWindow)) {
+    return null;
+  }
+
+  const { start, end } = result.scheduleWindow;
+  if (!(start instanceof Date) || !(end instanceof Date) || end <= start) {
+    return null;
+  }
+
+  return { start, end };
+}
+
 async function createScheduleImpactAction(params: {
   userId: string;
   threadId?: string | null;
   messageId?: string | null;
   task: { id: string; title: string; planningCycleId: string | null; priority: number; cognitiveLoad: number; dueAt: Date | null; estimatedMinutes: number | null };
+  scheduleWindow?: { start: Date; end: Date } | null;
 }) {
-  const { userId, threadId, messageId, task } = params;
+  const { userId, threadId, messageId, task, scheduleWindow } = params;
 
   if (!taskNeedsScheduleImpact(task)) {
     return null;
@@ -929,6 +1002,8 @@ async function createScheduleImpactAction(params: {
         trigger: "task_added",
         taskId: task.id,
         rawText: `Generate a revised schedule proposal after adding "${task.title}".`,
+        start: scheduleWindow?.start.toISOString(),
+        end: scheduleWindow?.end.toISOString(),
         ambiguous: false,
         scheduleImpact: {
           reason: "This task is high priority, high difficulty, or due soon, so it may need to change the current schedule.",
@@ -1278,6 +1353,7 @@ async function recordAndMaybeExecuteAction(params: {
             threadId,
             messageId,
             task: result.task,
+            scheduleWindow: getScheduleWindowFromResult(result),
           })
         : null;
 
@@ -1756,6 +1832,7 @@ export async function confirmAiAction(
             threadId: aiAction.threadId,
             messageId: aiAction.messageId,
             task: result.task,
+            scheduleWindow: getScheduleWindowFromResult(result),
           })
         : null;
 
