@@ -288,11 +288,11 @@ function getRecordArray(value: unknown) {
 function ScheduleResultDetails({
   resultPayload,
   onConfirm,
-  isPending,
+  pendingActionIds,
 }: {
   resultPayload: Record<string, unknown> | null | undefined;
   onConfirm: (actionId: string) => void;
-  isPending: boolean;
+  pendingActionIds: Set<string>;
 }) {
   if (!resultPayload) return null;
 
@@ -301,6 +301,7 @@ function ScheduleResultDetails({
   const saveScheduleAction = isRecord(resultPayload.saveScheduleAction) ? resultPayload.saveScheduleAction : null;
   const saveActionId = typeof saveScheduleAction?.id === "string" ? saveScheduleAction.id : null;
   const saveActionStatus = typeof saveScheduleAction?.status === "string" ? saveScheduleAction.status : null;
+  const isSavePending = saveActionId ? pendingActionIds.has(saveActionId) : false;
   const dryRun = resultPayload.dryRun !== false;
   const hasBlocks = blocks.length > 0;
 
@@ -380,11 +381,11 @@ function ScheduleResultDetails({
           </p>
           <button
             type="button"
-            disabled={isPending}
+            disabled={isSavePending}
             onClick={() => onConfirm(saveActionId)}
             className="shrink-0 rounded-full border border-white/30 px-3 py-1 text-xs text-[#F5F5F5] disabled:opacity-50"
           >
-            {isPending ? "..." : "Save schedule"}
+            {isSavePending ? "..." : "Save schedule"}
           </button>
         </div>
       )}
@@ -422,16 +423,145 @@ function CheckinDetails({ payload }: { payload: Record<string, unknown> }) {
   );
 }
 
+function TaskResultDetails({
+  inputPayload,
+  resultPayload,
+  onConfirm,
+  pendingActionIds,
+}: {
+  inputPayload: Record<string, unknown>;
+  resultPayload: Record<string, unknown> | null | undefined;
+  onConfirm: (actionId: string) => void;
+  pendingActionIds: Set<string>;
+}) {
+  if (!resultPayload) return null;
+
+  const task = isRecord(resultPayload.task) ? resultPayload.task : null;
+  const breakdowns = getRecordArray(resultPayload.taskBreakdowns);
+  const scheduleAction = isRecord(resultPayload.proposedScheduleAction)
+    ? resultPayload.proposedScheduleAction
+    : null;
+  const scheduleActionId = typeof scheduleAction?.id === "string" ? scheduleAction.id : null;
+  const scheduleActionStatus = typeof scheduleAction?.status === "string" ? scheduleAction.status : null;
+  const scheduleActionResultPayload = isRecord(scheduleAction?.resultPayload)
+    ? scheduleAction.resultPayload
+    : null;
+  const isScheduleActionPending = scheduleActionId ? pendingActionIds.has(scheduleActionId) : false;
+  const title = typeof task?.title === "string" ? task.title : typeof inputPayload.title === "string" ? inputPayload.title : null;
+  const estimatedMinutes =
+    typeof task?.estimatedMinutes === "number"
+      ? task.estimatedMinutes
+      : typeof inputPayload.estimatedMinutes === "number"
+        ? inputPayload.estimatedMinutes
+        : null;
+  const cognitiveLoad =
+    typeof task?.cognitiveLoad === "number"
+      ? task.cognitiveLoad
+      : typeof inputPayload.cognitiveLoad === "number"
+        ? inputPayload.cognitiveLoad
+        : null;
+  const priority =
+    typeof task?.priority === "number"
+      ? task.priority
+      : typeof inputPayload.priority === "number"
+        ? inputPayload.priority
+        : null;
+  const scheduleStart = typeof inputPayload.scheduleStart === "string" ? formatLongDate(inputPayload.scheduleStart) : null;
+  const scheduleEndRaw = typeof inputPayload.scheduleEnd === "string" ? new Date(inputPayload.scheduleEnd) : null;
+  const scheduleEnd =
+    scheduleEndRaw && !Number.isNaN(scheduleEndRaw.getTime())
+      ? formatLongDate(new Date(scheduleEndRaw.getTime() - 60_000).toISOString())
+      : null;
+
+  return (
+    <div className="relative z-10 mt-4 flex flex-col gap-3">
+      <div className="rounded-xl border border-[#3D95A9]/25 bg-[#3D95A9]/8 p-3">
+        <p className="text-sm font-medium text-[#F5F5F5]">Task saved</p>
+        <p className="caption mt-1 text-[12px] leading-relaxed text-[#A0A0A0]">
+          {title ? `"${title}" was added` : "The task was added"}
+          {estimatedMinutes ? ` as ${estimatedMinutes} minutes` : ""}
+          {cognitiveLoad ? ` with difficulty ${cognitiveLoad}/7` : ""}
+          {priority ? ` and priority ${priority}/5` : ""}.
+        </p>
+        {(scheduleStart || scheduleEnd) && (
+          <p className="caption mt-2 text-[12px] leading-relaxed text-[#A0A0A0]">
+            Scheduling target: {scheduleStart}
+            {scheduleStart && scheduleEnd ? " through " : ""}
+            {scheduleEnd}
+          </p>
+        )}
+      </div>
+
+      {breakdowns.length > 0 && (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+          <p className="text-xs uppercase tracking-wide text-white/35">Breakdown created</p>
+          <div className="mt-2 space-y-2">
+            {breakdowns.map((breakdown, index) => {
+              const stepTitle =
+                typeof breakdown.title === "string" && breakdown.title.trim()
+                  ? breakdown.title.trim()
+                  : `Step ${index + 1}`;
+              const minutes = typeof breakdown.estimatedMinutes === "number" ? breakdown.estimatedMinutes : null;
+              const load = typeof breakdown.cognitiveLoad === "number" ? breakdown.cognitiveLoad : null;
+
+              return (
+                <div key={`${stepTitle}-${index}`} className="flex items-start justify-between gap-3">
+                  <p className="caption text-[12px] leading-relaxed text-[#D9D9D9]">
+                    {index + 1}. {stepTitle}
+                  </p>
+                  {(minutes || load) && (
+                    <span className="caption shrink-0 text-[10px] text-[#A0A0A0]">
+                      {minutes ? `${minutes}m` : ""}
+                      {minutes && load ? " · " : ""}
+                      {load ? `${load}/7` : ""}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {scheduleActionId && scheduleActionStatus === "proposed" && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-[#36B539]/25 bg-[#36B539]/8 p-3">
+          <p className="caption text-[12px] leading-relaxed text-[#A0A0A0]">
+            Next, preview where these study blocks fit on your calendar.
+          </p>
+          <button
+            type="button"
+            disabled={isScheduleActionPending}
+            onClick={() => onConfirm(scheduleActionId)}
+            className="shrink-0 rounded-full border border-white/30 px-3 py-1 text-xs text-[#F5F5F5] disabled:opacity-50"
+          >
+            {isScheduleActionPending ? "..." : "Preview schedule"}
+          </button>
+        </div>
+      )}
+
+      {scheduleActionStatus === "executed" && scheduleActionResultPayload && (
+        <ScheduleResultDetails
+          resultPayload={scheduleActionResultPayload}
+          onConfirm={onConfirm}
+          pendingActionIds={pendingActionIds}
+        />
+      )}
+    </div>
+  );
+}
+
 function ActionCard({
   action,
   onConfirm,
   onCancel,
   isPending,
+  pendingActionIds,
 }: {
   action: AiAction;
   onConfirm: (actionId: string) => void;
   onCancel: (actionId: string) => void;
   isPending: boolean;
+  pendingActionIds: Set<string>;
 }) {
   const p = action.inputPayload;
   const title = actionDisplayTitle(action);
@@ -479,12 +609,20 @@ function ActionCard({
         </div>
       )}
       {action.actionType === "DAILY_CHECKIN" && <CheckinDetails payload={p} />}
+      {action.actionType === "CREATE_TASK" && action.status === "executed" && (
+        <TaskResultDetails
+          inputPayload={p}
+          resultPayload={action.resultPayload}
+          onConfirm={onConfirm}
+          pendingActionIds={pendingActionIds}
+        />
+      )}
       {action.actionType === "GENERATE_SCHEDULE" && <ScheduleProposalDetails payload={p} />}
       {action.actionType === "GENERATE_SCHEDULE" && action.status === "executed" && (
         <ScheduleResultDetails
           resultPayload={action.resultPayload}
           onConfirm={onConfirm}
-          isPending={isPending}
+          pendingActionIds={pendingActionIds}
         />
       )}
       {action.errorMessage && (
@@ -518,6 +656,8 @@ function ActionCard({
         <p className="relative z-10 mt-4 text-[10px] uppercase tracking-wide text-emerald-500">
           {action.actionType === "DAILY_CHECKIN"
             ? "Check-in saved"
+            : action.actionType === "CREATE_TASK"
+              ? "Task saved"
             : action.actionType === "GENERATE_SCHEDULE" && action.resultPayload?.dryRun !== false
               ? "Preview ready"
               : "Saved"}
@@ -671,6 +811,7 @@ function Message({
               onConfirm={onConfirm}
               onCancel={onCancel}
               isPending={pendingActionIds.has(action.id)}
+              pendingActionIds={pendingActionIds}
             />
           ))}
         </div>
@@ -828,7 +969,19 @@ export default function ChatPage() {
           const nestedSaveAction = isRecord(existingAction.resultPayload?.saveScheduleAction)
             ? existingAction.resultPayload.saveScheduleAction
             : null;
-          return existingAction.id === action.id || nestedSaveAction?.id === action.id;
+          const nestedProposedScheduleAction = isRecord(existingAction.resultPayload?.proposedScheduleAction)
+            ? existingAction.resultPayload.proposedScheduleAction
+            : null;
+          const nestedProposedSaveAction = isRecord(nestedProposedScheduleAction?.resultPayload)
+            && isRecord(nestedProposedScheduleAction.resultPayload.saveScheduleAction)
+            ? nestedProposedScheduleAction.resultPayload.saveScheduleAction
+            : null;
+          return (
+            existingAction.id === action.id
+            || nestedSaveAction?.id === action.id
+            || nestedProposedScheduleAction?.id === action.id
+            || nestedProposedSaveAction?.id === action.id
+          );
         })) {
           return message;
         }
@@ -840,13 +993,51 @@ export default function ChatPage() {
             const nestedSaveAction = isRecord(existingAction.resultPayload?.saveScheduleAction)
               ? existingAction.resultPayload.saveScheduleAction
               : null;
-            if (nestedSaveAction?.id !== action.id) return existingAction;
+
+            if (nestedSaveAction?.id === action.id) {
+              return {
+                ...existingAction,
+                resultPayload: {
+                  ...(existingAction.resultPayload ?? {}),
+                  saveScheduleAction: action,
+                },
+              };
+            }
+
+            const nestedProposedScheduleAction = isRecord(existingAction.resultPayload?.proposedScheduleAction)
+              ? existingAction.resultPayload.proposedScheduleAction
+              : null;
+
+            if (nestedProposedScheduleAction?.id === action.id) {
+              return {
+                ...existingAction,
+                resultPayload: {
+                  ...(existingAction.resultPayload ?? {}),
+                  proposedScheduleAction: action,
+                },
+              };
+            }
+
+            const nestedProposedResultPayload = isRecord(nestedProposedScheduleAction?.resultPayload)
+              ? nestedProposedScheduleAction.resultPayload
+              : null;
+            const nestedProposedSaveAction = isRecord(nestedProposedResultPayload?.saveScheduleAction)
+              ? nestedProposedResultPayload.saveScheduleAction
+              : null;
+
+            if (nestedProposedSaveAction?.id !== action.id) return existingAction;
 
             return {
               ...existingAction,
               resultPayload: {
                 ...(existingAction.resultPayload ?? {}),
-                saveScheduleAction: action,
+                proposedScheduleAction: {
+                  ...nestedProposedScheduleAction,
+                  resultPayload: {
+                    ...(nestedProposedResultPayload ?? {}),
+                    saveScheduleAction: action,
+                  },
+                },
               },
             };
           }),
@@ -899,12 +1090,35 @@ export default function ChatPage() {
         const nestedSaveAction = isRecord(action.resultPayload?.saveScheduleAction)
           ? action.resultPayload.saveScheduleAction
           : null;
+        const nestedProposedScheduleAction = isRecord(action.resultPayload?.proposedScheduleAction)
+          ? action.resultPayload.proposedScheduleAction
+          : null;
+        const nestedProposedSaveAction = isRecord(nestedProposedScheduleAction?.resultPayload)
+          && isRecord(nestedProposedScheduleAction.resultPayload.saveScheduleAction)
+          ? nestedProposedScheduleAction.resultPayload.saveScheduleAction
+          : null;
         if (
           operation === "confirm" &&
           nestedSaveAction?.status === "proposed" &&
           typeof nestedSaveAction.id === "string"
         ) {
           return nestedSaveAction.id;
+        }
+
+        if (
+          operation === "confirm" &&
+          nestedProposedScheduleAction?.status === "proposed" &&
+          typeof nestedProposedScheduleAction.id === "string"
+        ) {
+          return nestedProposedScheduleAction.id;
+        }
+
+        if (
+          operation === "confirm" &&
+          nestedProposedSaveAction?.status === "proposed" &&
+          typeof nestedProposedSaveAction.id === "string"
+        ) {
+          return nestedProposedSaveAction.id;
         }
 
         if (action.status === "proposed" && !action.inputPayload.ambiguous) {
